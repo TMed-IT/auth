@@ -14,14 +14,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Generate wrangler.jsonc
         env:
@@ -31,13 +36,13 @@ jobs:
           AUTH_TOKEN_MAX_AGE: ${{ vars.AUTH_TOKEN_MAX_AGE }}
           AUTH_EMAIL_ALLOW_REGEX: ${{ vars.AUTH_EMAIL_ALLOW_REGEX }}
           NEXTJS_ENV: ${{ vars.NEXTJS_ENV }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           NEXT_PUBLIC_TERMS_URL: ${{ vars.NEXT_PUBLIC_TERMS_URL }}
           NEXT_PUBLIC_PRIVACY_POLICY_URL: ${{ vars.NEXT_PUBLIC_PRIVACY_POLICY_URL }}
           NEXT_PUBLIC_SUPPORT_EMAIL: ${{ vars.NEXT_PUBLIC_SUPPORT_EMAIL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           ENCRYPTION_SECRET: ${{ secrets.ENCRYPTION_SECRET }}
           CSRF_SECRET: ${{ secrets.CSRF_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
@@ -50,16 +55,16 @@ jobs:
             'AUTH_URL': process.env.AUTH_URL,
             'FRONTEND_URL': process.env.FRONTEND_URL,
             'AUTH_COOKIE_DOMAIN': process.env.AUTH_COOKIE_DOMAIN,
-            'AUTH_TOKEN_MAX_AGE': parseInt(process.env.AUTH_TOKEN_MAX_AGE, 10),
+            'AUTH_TOKEN_MAX_AGE': process.env.AUTH_TOKEN_MAX_AGE,
             'AUTH_EMAIL_ALLOW_REGEX': process.env.AUTH_EMAIL_ALLOW_REGEX,
             'NEXTJS_ENV': process.env.NEXTJS_ENV,
+            'GOOGLE_CLIENT_ID': process.env.GOOGLE_CLIENT_ID,
             'NEXT_PUBLIC_TERMS_URL': process.env.NEXT_PUBLIC_TERMS_URL,
             'NEXT_PUBLIC_PRIVACY_POLICY_URL': process.env.NEXT_PUBLIC_PRIVACY_POLICY_URL,
             'NEXT_PUBLIC_SUPPORT_EMAIL': process.env.NEXT_PUBLIC_SUPPORT_EMAIL,
             'JWT_SECRET': process.env.JWT_SECRET,
             'ENCRYPTION_SECRET': process.env.ENCRYPTION_SECRET,
             'CSRF_SECRET': process.env.CSRF_SECRET,
-            'GOOGLE_CLIENT_ID': process.env.GOOGLE_CLIENT_ID,
             'GOOGLE_CLIENT_SECRET': process.env.GOOGLE_CLIENT_SECRET
           };
           
@@ -71,11 +76,24 @@ jobs:
             }
           ];
           
+          config.routes = [
+            {
+              'pattern': 'auth.tmedit.org/*',
+              'zone_name': 'tmedit.org'
+            }
+          ];
+          
+          config.workers_dev = false;
+          
           fs.writeFileSync('wrangler.jsonc', JSON.stringify(config, null, '\t'));
           "
 
       - name: Build with OpenNext
-        run: npx opennextjs-cloudflare build
+        env:
+          NEXT_PUBLIC_TERMS_URL: ${{ vars.NEXT_PUBLIC_TERMS_URL }}
+          NEXT_PUBLIC_PRIVACY_POLICY_URL: ${{ vars.NEXT_PUBLIC_PRIVACY_POLICY_URL }}
+          NEXT_PUBLIC_SUPPORT_EMAIL: ${{ vars.NEXT_PUBLIC_SUPPORT_EMAIL }}
+        run: pnpm exec opennextjs-cloudflare build
 
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3

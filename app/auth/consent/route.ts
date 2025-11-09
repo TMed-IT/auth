@@ -5,8 +5,6 @@ import { sameDomainRedirectOrFallback } from '@/lib/server/url'
 import type { D1Database } from '@/lib/server/d1'
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
-
 type EnvBasic = { FRONTEND_URL?: string; AUTH_URL?: string; AUTH_COOKIE_DOMAIN?: string; AUTH_TOKEN_MAX_AGE?: number | string; DB?: D1Database }
 
 type PendingUser = { email: string; given_name?: string; family_name?: string; picture?: string; redirect?: string }

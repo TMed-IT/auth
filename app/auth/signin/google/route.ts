@@ -4,8 +4,6 @@ import { getServerEnv, requireEnv } from '@/lib/server/env'
 import { sameDomainRedirectOrNull } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
-
 type SigninEnv = { AUTH_URL?: string; GOOGLE_CLIENT_ID?: string; AUTH_COOKIE_DOMAIN?: string }
 
 export async function POST(req: NextRequest) {
@@ -35,5 +33,4 @@ export async function POST(req: NextRequest) {
   const authUrlForGoogle = createGoogleAuthUrl(String(googleClientId), redirectUri, state, challenge, nonce)
   return NextResponse.json({ authUrl: authUrlForGoogle }, { headers: response.headers })
 }
-
 

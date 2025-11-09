@@ -5,8 +5,6 @@ import { sameDomainRedirectOrFallback } from '@/lib/server/url'
 import type { D1Database } from '@/lib/server/d1'
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
-
 const validateEmailRegex = (email: string, pattern: string) => {
   try {
     const r = new RegExp(pattern)

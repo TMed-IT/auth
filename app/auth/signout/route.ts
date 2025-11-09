@@ -3,8 +3,6 @@ import { getServerEnv } from '@/lib/server/env'
 import { verifyJWT } from '@/app/api/_auth/auth'
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
-
 type SignoutEnv = { AUTH_URL?: string; FRONTEND_URL?: string }
 
 export async function GET(req: NextRequest) {
@@ -63,6 +61,5 @@ export async function POST(req: NextRequest) {
   deleteAuthCookie(cookies)
   return response
 }
-
 
 

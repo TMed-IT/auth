@@ -4,8 +4,6 @@ import { getServerEnv } from '@/lib/server/env'
 import type { D1Database } from '@/lib/server/d1'
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
-
 type SessionEnv = { DB?: D1Database }
 
 export async function GET(req: NextRequest) {
