@@ -1,0 +1,35 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "auth",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2025-03-01",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".open-next/assets"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"AUTH_URL": "https://auth.example.com",
+		"FRONTEND_URL": "https://auth.example.com",
+		"AUTH_COOKIE_DOMAIN": ".example.com",
+		"AUTH_TOKEN_MAX_AGE": 604800,
+		"AUTH_EMAIL_ALLOW_REGEX": "^.+@example\\.com$",
+		"NEXTJS_ENV": "production",
+		"NEXT_PUBLIC_TERMS_URL": "https://example.com/terms",
+		"NEXT_PUBLIC_PRIVACY_POLICY_URL": "https://example.com/privacy",
+		"NEXT_PUBLIC_SUPPORT_EMAIL": "support@example.com"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "REPLACE_WITH_D1_NAME",
+			"database_id": "REPLACE_WITH_D1_ID"
+		}
+	]
+}
