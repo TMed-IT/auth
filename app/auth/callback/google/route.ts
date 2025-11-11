@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
   }
 
   const db = env.DB as D1Database
-  type UserRow = { id: string; email: string; given_name: string; family_name: string }
+  type UserRow = { id: string; email: string; given_name: string; family_name: string; avatar: string | null }
   
   try {
     const existing = await db.prepare('SELECT * FROM users WHERE email = ?').bind(googleUser.email).first<UserRow>()
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
         email: googleUser.email,
         given_name: googleUser.given_name || '',
         family_name: googleUser.family_name || '',
-        picture: googleUser.picture || '',
+        avatar: googleUser.picture || '',
         redirect: pendingRedirect || '',
       }
       await setEncryptedTempCookie(cookies, 'pending_user', JSON.stringify(tmp), getTempCookieMaxAge())
@@ -77,11 +77,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(consentUrl, { status: 302, headers: response.headers })
     }
 
+    const avatarUrl = googleUser.picture || null
+    if (avatarUrl && avatarUrl !== existing.avatar) {
+      await db.prepare('UPDATE users SET avatar = ? WHERE id = ?').bind(avatarUrl, existing.id).run()
+    }
+
     const authTokenMaxAge = validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
     const frontendUrl = requireEnv(env.FRONTEND_URL, 'FRONTEND_URL')
     
     const name = `${existing.family_name} ${existing.given_name}`
-    const jwt = await generateJWT({ id: existing.id, email: existing.email, name, picture: googleUser.picture }, authTokenMaxAge)
+    const avatar = avatarUrl || existing.avatar || undefined
+    const jwt = await generateJWT({ id: existing.id, email: existing.email, name, avatar }, authTokenMaxAge)
     setAuthCookie(cookies, jwt)
     const location = sameDomainRedirectOrFallback(pendingRedirect, frontendUrl, env)
     return NextResponse.redirect(location, { status: 302, headers: response.headers })

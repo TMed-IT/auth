@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 type EnvBasic = { FRONTEND_URL?: string; AUTH_URL?: string; AUTH_COOKIE_DOMAIN?: string; AUTH_TOKEN_MAX_AGE?: number | string; DB?: D1Database }
 
-type PendingUser = { email: string; given_name?: string; family_name?: string; picture?: string; redirect?: string }
+type PendingUser = { email: string; given_name?: string; family_name?: string; avatar?: string; redirect?: string }
 
 export async function GET(req: NextRequest) {
   const response = NextResponse.json({})
@@ -62,10 +62,11 @@ export async function POST(req: NextRequest) {
   }
 
   const db = env.DB as D1Database
-  type UserRow = { id: string; email: string; given_name: string; family_name: string }
+  type UserRow = { id: string; email: string; given_name: string; family_name: string; avatar: string | null }
   
   let id: string
   let name: string
+  let avatar: string | null | undefined
   
   try {
     const existing = await db.prepare('SELECT * FROM users WHERE email = ?').bind(data.email).first<UserRow>()
@@ -73,12 +74,19 @@ export async function POST(req: NextRequest) {
     if (existing) {
       id = existing.id
       name = `${existing.family_name} ${existing.given_name}`.trim()
+      if (data.avatar && data.avatar !== existing.avatar) {
+        await db.prepare('UPDATE users SET avatar = ? WHERE id = ?').bind(data.avatar, id).run()
+        avatar = data.avatar
+      } else {
+        avatar = existing.avatar
+      }
     } else {
       id = crypto.randomUUID()
       const nowIso = new Date().toISOString()
-      await db.prepare('INSERT INTO users(id, email, given_name, family_name, display_name, created_at) VALUES(?, ?, ?, ?, NULL, ?)')
-        .bind(id, data.email, data.given_name || '', data.family_name || '', nowIso).run()
+      await db.prepare('INSERT INTO users(id, email, given_name, family_name, display_name, avatar, created_at) VALUES(?, ?, ?, ?, NULL, ?, ?)')
+        .bind(id, data.email, data.given_name || '', data.family_name || '', data.avatar || null, nowIso).run()
       name = `${data.family_name || ''} ${data.given_name || ''}`.trim()
+      avatar = data.avatar
     }
   } catch (dbError) {
     console.error('Database error:', dbError)
@@ -86,8 +94,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const avatarValue = avatar || undefined
+    
     const authTokenMaxAge = validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
-    const jwt = await generateJWT({ id, email: data.email, name }, authTokenMaxAge)
+    const jwt = await generateJWT({ id, email: data.email, name, avatar: avatarValue }, authTokenMaxAge)
     setAuthCookie(cookies, jwt)
     deleteCookie(cookies, 'pending_user')
 

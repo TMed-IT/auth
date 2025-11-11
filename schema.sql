@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   given_name TEXT NOT NULL,
   family_name TEXT NOT NULL,
   display_name TEXT NULL,
+  avatar TEXT NULL,
   created_at DATETIME NOT NULL
 );
 

@@ -170,10 +170,10 @@ export const getGoogleUserInfo = async (accessToken: string): Promise<AuthUser |
 
 const textToBytes = (s: string) => new TextEncoder().encode(s)
 
-type CustomJWTPayload = { sub: string; email: string; name: string; picture?: string; iat: number; exp: number }
+type CustomJWTPayload = { sub: string; email: string; name: string; avatar?: string; iat: number; exp: number }
 
 export const generateJWT = async (
-  user: { id: string; email: string; name: string; picture?: string },
+  user: { id: string; email: string; name: string; avatar?: string },
   maxAgeSeconds: number,
 ) => {
   const env = getServerEnv<{ JWT_SECRET?: string }>()
@@ -184,7 +184,7 @@ export const generateJWT = async (
     sub: user.id,
     email: user.email,
     name: user.name,
-    picture: user.picture,
+    avatar: user.avatar,
     iat: now,
     exp: now + maxAgeSeconds,
   }
