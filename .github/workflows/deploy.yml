@@ -81,10 +81,6 @@ jobs:
             [ -n "${ENCRYPTION_SECRET:-}" ] || { echo "Error: ENCRYPTION_SECRET is missing"; exit 1; }
             [ -n "${CSRF_SECRET:-}" ] || { echo "Error: CSRF_SECRET is missing"; exit 1; }
             [ -n "${GOOGLE_CLIENT_SECRET:-}" ] || { echo "Error: GOOGLE_CLIENT_SECRET is missing"; exit 1; }
-            wrangler secret delete JWT_SECRET || true
-            wrangler secret delete ENCRYPTION_SECRET || true
-            wrangler secret delete CSRF_SECRET || true
-            wrangler secret delete GOOGLE_CLIENT_SECRET || true
             printf %s "$JWT_SECRET" | wrangler secret put JWT_SECRET
             printf %s "$ENCRYPTION_SECRET" | wrangler secret put ENCRYPTION_SECRET
             printf %s "$CSRF_SECRET" | wrangler secret put CSRF_SECRET
