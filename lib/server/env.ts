@@ -1,14 +1,12 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 
 export const getServerEnv = <T extends Record<string, unknown>>() => {
-  try {
-    const { env: cloudflareEnv } = getCloudflareContext()
-    const nodeEnv = typeof process !== 'undefined' ? (process.env as unknown as Partial<T>) : {}
-    return { ...nodeEnv, ...cloudflareEnv } as T
-  } catch {
-    const nodeEnv = typeof process !== 'undefined' ? (process.env as unknown as Partial<T>) : {}
-    return { ...nodeEnv } as T
+  if (typeof process === 'undefined' || !process.env) {
+    throw new Error('process.env is not available')
   }
+  const { env: cloudflareEnv } = getCloudflareContext()
+  const nodeEnv = process.env as unknown as Partial<T>
+  return { ...nodeEnv, ...cloudflareEnv } as T
 }
 
 export const requireEnv = <T>(value: T | undefined, name: string): T => {

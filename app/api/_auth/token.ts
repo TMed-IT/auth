@@ -21,8 +21,11 @@ type EnvShape = {
 }
 
 const getEnv = (): EnvShape => {
+  if (typeof process === 'undefined' || !process.env) {
+    throw new Error('process.env is not available')
+  }
   const g = globalThis as unknown as { env?: EnvShape }
-  const nodeEnv = typeof process !== 'undefined' ? (process.env as EnvShape) : {}
+  const nodeEnv = process.env as EnvShape
   return { ...nodeEnv, ...(g.env ?? {}) }
 }
 

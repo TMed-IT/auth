@@ -28,7 +28,6 @@ pnpm-debug.log*
 *.log
 
 # local env files
-.env
 .env*.local
 .dev.vars
 
@@ -57,3 +56,6 @@ package-lock.json
 
 # turbo
 .turbo
+
+# dotenvx
+.env.keys

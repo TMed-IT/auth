@@ -109,7 +109,7 @@ sequenceDiagram
 - `csrf_token`：`CSRF_SECRET` で暗号化し、メールまたはユーザー ID のハッシュにバインド。`GET` で配布し、`POST` 時に Cookie とボディの一致・Origin を必須化。
 - `redirect` パラメータは `AUTH_COOKIE_DOMAIN` 配下の HTTPS URL のみ許可し、無効な場合は `FRONTEND_URL` へフォールバックします。
 
-## D1 スキーマとコマンド
+## D1 スキーマ
 
 ```sql
 CREATE TABLE IF NOT EXISTS users (
@@ -122,14 +122,11 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ```
 
-- ローカル適用: `npm run db:schema`
-- リセット: `npm run db:reset`（users テーブルを DROP → 再作成）
-- データ確認: `npm run db:list`
-- 本番適用: `wrangler d1 execute DB --file=./schema.sql`
+スキーマの適用方法は「npm スクリプト」セクションを参照してください。
 
-## 必須設定
+## 環境変数一覧
 
-### Wrangler `vars`
+### 必須環境変数
 
 | 変数 | 説明 | 例 |
 | ---- | ---- | -- |
@@ -137,70 +134,129 @@ CREATE TABLE IF NOT EXISTS users (
 | `FRONTEND_URL` | 認証後に戻す SPA/サイト | `https://example.com` |
 | `AUTH_COOKIE_DOMAIN` | 共有 Cookie のルートドメイン（`.` から開始推奨） | `.example.com` |
 | `AUTH_TOKEN_MAX_AGE` | `auth_token` / CSRF トークン寿命（秒） | `604800` |
-| `AUTH_EMAIL_ALLOW_REGEX` | 許可メール判定 | `^.+@example\\.com$` |
-| `NEXTJS_ENV` | OpenNext ビルドモード | `production` or `development` |
+| `AUTH_EMAIL_ALLOW_REGEX` | 許可メール判定の正規表現 | `^.+@example\\.com$` |
+| `NEXTJS_ENV` | OpenNext ビルドモード | `production` または `development` |
+| `GOOGLE_CLIENT_ID` | Google OAuth クライアント ID | - |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth クライアント Secret | - |
+| `JWT_SECRET` | `auth_token` 署名用のシークレット（HS256） | - |
+| `ENCRYPTION_SECRET` | `pending_user` など Iron 暗号化用のシークレット | - |
+| `CSRF_SECRET` | `csrf_token` の暗号化/復号用のシークレット | - |
+| `NEXT_PUBLIC_TERMS_URL` | 利用規約の URL | `https://example.com/terms` |
+| `NEXT_PUBLIC_PRIVACY_POLICY_URL` | プライバシーポリシーの URL | `https://example.com/privacy` |
+| `NEXT_PUBLIC_SUPPORT_EMAIL` | サポートメールアドレス | `support@example.com` |
+| `D1_DATABASE_NAME` | D1 データベース名 | - |
+| `D1_DATABASE_ID` | D1 データベース ID | - |
 
-### Wrangler `d1_databases`
-
-- `binding: "DB"` をこのリポジトリの D1 にマップしてください。
-
-### Wrangler `secret`
-
-| シークレット | 用途 |
-| ------------ | ---- |
-| `JWT_SECRET` | `auth_token` 署名（HS256） |
-| `ENCRYPTION_SECRET` | `pending_user` など Iron 暗号化 |
-| `CSRF_SECRET` | `csrf_token` の暗号化/復号 |
-| `GOOGLE_CLIENT_ID` | Google OAuth クライアント ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth クライアント Secret |
-
-### Next.js 公開環境変数
-
-`next.config.ts` が未設定を許容しないため必須です。
-
-- `NEXT_PUBLIC_TERMS_URL`
-- `NEXT_PUBLIC_PRIVACY_POLICY_URL`
-- `NEXT_PUBLIC_SUPPORT_EMAIL`
-
-### 任意 / 補足
+### 任意環境変数
 
 | 変数 | 説明 | 既定値 |
 | ---- | ---- | ------ |
 | `TEMP_COOKIE_MAX_AGE` | 一時 Cookie（state, nonce, pending_user）の寿命（秒） | `180` |
 | `NODE_ENV` | `production` の場合のみ Cookie に `Secure` を付与 | `development` |
 
-## `.dev.vars` 例
+**注意**: これらの環境変数は `.env` ファイルに設定し、暗号化してリポジトリにコミットします。ローカル開発時は `.env.local` に設定してください。
 
-ローカル開発時は `.dev.vars` に **vars** + **secrets** + **NEXT_PUBLIC\*** をまとめて記述します。
-.dev.vars.example をご参照ください。
+## 環境変数管理（dotenvx）
 
-`initOpenNextCloudflareForDev()` により `npm run dev` 実行時に Miniflare + ローカル D1 が自動で立ち上がるため、別コマンドでの DB 起動は不要です。
+このプロジェクトでは [dotenvx](https://github.com/dotenvx/dotenvx) を使用して環境変数を管理します。
+
+### ローカル開発用
+
+- `.env.local` に環境変数を設定（gitignore に含まれます）
+- `.env` を参考に必要な環境変数を設定してください
+
+### 本番用（暗号化）
+
+- `.env` ファイルを直接暗号化してリポジトリにコミットします
+- 暗号化キーは GitHub Secrets の `DOTENVX_KEY` に保存します
+- ローカル開発時は `.env.local` を使用します（`.env` は暗号化されているため使用不可）
+
+### 環境変数の管理方法
+
+#### 環境変数の追加・更新
+
+`dotenvx set` コマンドを使用して環境変数を追加・更新します:
+
+```bash
+pnpm exec dotenvx set KEY=value --file .env
+```
+
+複数の環境変数を一度に設定する場合:
+
+```bash
+pnpm exec dotenvx set KEY1=value1 KEY2=value2 --file .env
+```
+
+#### `.env` の暗号化
+
+1. `.env` ファイルに環境変数を設定（`dotenvx set` を使用）
+2. 以下のコマンドで `.env` 自体を暗号化（上書き）:
+   ```bash
+   pnpm exec dotenvx encrypt --file .env
+   ```
+3. 暗号化キーを GitHub Secrets の `DOTENVX_KEY` に設定（初回のみ）
+4. 暗号化された `.env` をコミット
+
+**注意**: `.env` を暗号化すると、ローカル開発時は使用できなくなります。必ず `.env.local` でローカル用の環境変数を設定してください。
+
+`initOpenNextCloudflareForDev()` により `pnpm run dev` 実行時に Miniflare + ローカル D1 が自動で立ち上がるため、別コマンドでの DB 起動は不要です。
 
 ## 開発フロー
 
-1. 依存関係のインストール: `npm install`
-2. `.dev.vars` を作成し上記の値を設定
-3. ローカル D1 にスキーマ適用: `npm run db:schema`
-4. 開発サーバー: `npm run dev`（`http://localhost:3000` を開く）
+1. 依存関係のインストール: `pnpm install`
+2. `.env.local` を作成し上記の値を設定（`.env` を参考）
+3. ローカル D1 にスキーマ適用: `pnpm run db:schema`
+4. 開発サーバー: `pnpm run dev`（`http://localhost:3000` を開く）
 
 ## npm スクリプト
 
-- `npm run dev` : Next.js 開発サーバー（Turbopack）
-- `npm run build` / `npm run start` : Next.js 本番ビルド & Node サーバー
-- `npm run deploy` : `opennextjs-cloudflare build` → `deploy`（Workers へ）
-- `npm run preview` : 本番と同一バンドルで Cloudflare Preview を起動
-- `npm run lint` : ESLint
-- `npm run cf-typegen` : `wrangler types` による `cloudflare-env.d.ts` 生成
-- `npm run db:schema` / `db:reset` / `db:list` : D1 ユーティリティ
+- `pnpm run dev` : Next.js 開発サーバー（Turbopack、dotenvx で `.env.local` を使用）
+- `pnpm run build` : Next.js 本番ビルド（dotenvx で環境変数を読み込み）
+- `pnpm run lint` : ESLint
+- `pnpm run deploy` : `opennextjs-cloudflare build` → `deploy`（Workers へ）
+- `pnpm run preview` : 本番と同一バンドルで Cloudflare Preview を起動（dotenvx で環境変数を読み込み）
+- `pnpm run cf-typegen` : `wrangler types` による `cloudflare-env.d.ts` 生成
+- `pnpm run db:schema` : ローカル D1 にスキーマを適用
+- `pnpm run db:reset` : ローカル D1 をリセット（テーブル削除 → 再作成）
+- `pnpm run db:list` : ローカル D1 のデータを確認
+
+**本番 D1 へのスキーマ適用**: `wrangler d1 execute DB --file=./schema.sql`
 
 ## デプロイ手順（Cloudflare Workers）
 
-1. `wrangler login` → `wrangler d1 create ...` → `wrangler d1 binding` を完了し、`wrangler.jsonc` の `d1_databases` を更新。
-2. `wrangler secret put` で Secrets を登録し、`wrangler variables` or `wrangler.toml` で `vars` を設定。
-3. `npm run build`
+### GitHub Actions 経由（推奨）
+
+#### 必要な設定
+
+GitHub リポジトリの Settings → Secrets and variables → Actions で以下を設定してください。
+
+##### Secrets（機密情報）
+
+| Secret 名 | 説明 | 取得方法 |
+| --------- | ---- | -------- |
+| `DOTENVX_KEY` | `.env` ファイルの復号キー | `dotenvx encrypt` 実行時に生成されるキー |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API トークン | [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) で作成（`Edit Cloudflare Workers` 権限が必要） |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウント ID | [Cloudflare Dashboard](https://dash.cloudflare.com/) の右サイドバーから取得 |
+
+##### 環境変数の設定
+
+必要な環境変数は「環境変数一覧」セクションを参照してください。これらは `.env` ファイルに含めて暗号化してください（GitHub Secrets/Variables には設定不要）。
+
+#### デプロイフロー
+
+1. 上記の Secrets を GitHub に設定
+2. `.env` ファイルに環境変数を設定し、暗号化してコミット
+3. `main` ブランチへの push で自動デプロイが開始されます
+4. GitHub Actions が自動で `.env` を復号し、ビルド・デプロイを実行
+
+### 手動デプロイ
+
+1. `wrangler login` → `wrangler d1 create ...` → `wrangler d1 binding` を完了し、`wrangler.jsonc` の `d1_databases` を更新
+2. `.env` を復号: `pnpm exec dotenvx decrypt --file .env`
+3. `pnpm run build` でビルド
 4. 本番 D1 へスキーマ適用: `wrangler d1 execute DB --file=./schema.sql`
-5. `npm run deploy`（Workers にデプロイ）
-6. リハーサルとして `npm run preview` で Cloudflare 上の挙動を検証すると安全です。
+5. `pnpm run deploy`（Workers にデプロイ）
+6. リハーサルとして `pnpm run preview` で Cloudflare 上の挙動を検証すると安全です
 
 ## その他補足
 
