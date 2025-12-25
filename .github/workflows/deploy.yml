@@ -29,7 +29,7 @@ jobs:
       - name: Decrypt .env
         env:
           DOTENVX_KEY: ${{ secrets.DOTENVX_KEY }}
-        run: pnpm exec dotenvx decrypt --file .env
+        run: pnpm exec dotenvx decrypt .env
 
       - name: Generate wrangler.jsonc
         run: |
