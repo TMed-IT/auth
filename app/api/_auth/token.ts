@@ -16,6 +16,7 @@ type IronCrypto = {
 type EnvShape = {
   AUTH_COOKIE_DOMAIN?: string
   AUTH_TOKEN_MAX_AGE?: number | string
+  AUTH_URL?: string
   NODE_ENV?: string
   TEMP_COOKIE_MAX_AGE?: number | string
 }
