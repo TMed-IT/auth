@@ -3,7 +3,7 @@
 	"version": "1.0.0",
 	"private": true,
 	"scripts": {
-		"dev": "dotenvx run -- next dev --turbopack",
+		"dev": "next dev --turbopack",
 		"build": "dotenvx run -- next build",
 		"lint": "next lint",
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

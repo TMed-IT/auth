@@ -6,7 +6,7 @@ export const getServerEnv = <T extends Record<string, unknown>>() => {
   }
   const { env: cloudflareEnv } = getCloudflareContext()
   const nodeEnv = process.env as unknown as Partial<T>
-  return { ...nodeEnv, ...cloudflareEnv } as T
+  return { ...cloudflareEnv, ...nodeEnv } as T
 }
 
 export const requireEnv = <T>(value: T | undefined, name: string): T => {

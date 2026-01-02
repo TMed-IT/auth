@@ -42,8 +42,21 @@ export const validateAuthTokenMaxAge = (value: number | string | undefined, name
 
 const getCookieOptions = () => {
   const env = getEnv()
-  const isProduction = requireEnv(env.NODE_ENV, 'NODE_ENV') === 'production'
-  const domain = isProduction ? requireEnv(env.AUTH_COOKIE_DOMAIN, 'AUTH_COOKIE_DOMAIN') : env.AUTH_COOKIE_DOMAIN
+  const nodeEnv = env.NODE_ENV || process.env.NODE_ENV || 'development'
+  const isProduction = nodeEnv === 'production'
+  
+  let domain: string | undefined = undefined
+  if (isProduction) {
+    domain = requireEnv(env.AUTH_COOKIE_DOMAIN, 'AUTH_COOKIE_DOMAIN')
+  } else {
+    const authUrl = env.AUTH_URL || process.env.AUTH_URL
+    if (authUrl && (authUrl.includes('localhost') || authUrl.includes('127.0.0.1'))) {
+      domain = undefined
+    } else {
+      domain = env.AUTH_COOKIE_DOMAIN || undefined
+    }
+  }
+  
   const maxAge = validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
   const secure = isProduction
   return { domain, maxAge, secure }
