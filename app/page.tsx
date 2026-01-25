@@ -9,6 +9,23 @@ import { SupportLink } from "@/components/ui/support-link"
 
 type SigninResp = { authUrl?: string }
 
+const normalizeRedirectParam = (value: string | null): string | null => {
+  if (!value) return null
+  try {
+    // If already a valid URL, use as-is.
+    new URL(value)
+    return value
+  } catch {
+    try {
+      const decoded = decodeURIComponent(value)
+      new URL(decoded)
+      return decoded
+    } catch {
+      return null
+    }
+  }
+}
+
 async function startSignin(redirect?: string | null) {
   const r = await fetch('/auth/signin/google', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect: redirect || undefined }) })
   const j = (await r.json().catch(() => null)) as SigninResp | null
@@ -21,7 +38,8 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     try {
-      await startSignin(new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('redirect'))
+      const rawRedirect = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('redirect')
+      await startSignin(normalizeRedirectParam(rawRedirect))
     } catch (error) {
       console.error("Login error:", error)
     }
