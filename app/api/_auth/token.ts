@@ -96,7 +96,7 @@ export const getAuthCookie = (req: Request) => {
 
 export const setTempCookie = (cookies: ResponseCookies, name: string, value: string, maxAgeSec: number) => {
   const { domain, secure } = getCookieOptions()
-  cookies.set(name, encodeURIComponent(value), {
+  cookies.set(name, value, {
     path: '/',
     domain: domain || undefined,
     maxAge: maxAgeSec,
@@ -110,7 +110,12 @@ export const readCookie = (req: Request, name: string) => {
   const cookie = req.headers.get('cookie') || ''
   const m = cookie.split(/;\s*/).find((p) => p.startsWith(name + '='))
   if (!m) return null
-  return decodeURIComponent(m.split('=').slice(1).join('='))
+  const raw = m.split('=').slice(1).join('=')
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 export const deleteCookie = (cookies: ResponseCookies, name: string) => {
@@ -343,4 +348,3 @@ try {
   }
   throw error
 }
-
