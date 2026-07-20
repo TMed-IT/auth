@@ -2,96 +2,90 @@ name: Deploy to Cloudflare
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - uses: pnpm/action-setup@v6
 
-      - name: Decrypt .env
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: |
+          pnpm lint
+          pnpm exec tsc --noEmit
+          pnpm audit --prod --audit-level=moderate
+
+      - name: Build and deploy
         env:
           DOTENV_PRIVATE_KEY: ${{ secrets.DOTENVX_KEY }}
-        run: pnpm exec dotenvx decrypt .env
-
-      - name: Generate wrangler.jsonc
         run: |
-          pnpm exec dotenvx run --env-file=.env -- node -e "
-          const fs = require('fs');
-          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
-          
-          config.vars = {
-            'AUTH_URL': process.env.AUTH_URL,
-            'AUTH_TRUSTED_ORIGINS': process.env.AUTH_TRUSTED_ORIGINS,
-            'AUTH_TOKEN_MAX_AGE': process.env.AUTH_TOKEN_MAX_AGE,
-            'AUTH_EMAIL_ALLOW_REGEX': process.env.AUTH_EMAIL_ALLOW_REGEX,
-            'NEXTJS_ENV': process.env.NEXTJS_ENV,
-            'GOOGLE_CLIENT_ID': process.env.GOOGLE_CLIENT_ID,
-            'NEXT_PUBLIC_TERMS_URL': process.env.NEXT_PUBLIC_TERMS_URL,
-            'NEXT_PUBLIC_PRIVACY_POLICY_URL': process.env.NEXT_PUBLIC_PRIVACY_POLICY_URL,
-            'NEXT_PUBLIC_SUPPORT_EMAIL': process.env.NEXT_PUBLIC_SUPPORT_EMAIL
-          };
-          
-          config.d1_databases = [
-            {
-              'binding': 'DB',
-              'database_name': process.env.D1_DATABASE_NAME,
-              'database_id': process.env.D1_DATABASE_ID
-            }
-          ];
-          
-          config.routes = [
-            {
-              'pattern': 'auth.tmedit.org/*',
-              'zone_name': 'tmedit.org'
-            }
-          ];
-          
-          config.workers_dev = false;
-          
-          fs.writeFileSync('wrangler.jsonc', JSON.stringify(config, null, '\t'));
-          "
+          umask 077
+          env_file="$RUNNER_TEMP/deploy-env.json"
+          secrets_file="$RUNNER_TEMP/worker-secrets.json"
+          config_file="$PWD/wrangler.deploy.json"
+          trap 'rm -f "$env_file" "$secrets_file" "$config_file"' EXIT
 
-      - name: Build with OpenNext
-        run: pnpm exec dotenvx run --env-file=.env -- pnpm exec opennextjs-cloudflare build
+          pnpm exec dotenvx get -f .env --format=json > "$env_file"
+          jq -en --slurpfile env "$env_file" '
+            ["AUTH_URL","AUTH_TOKEN_MAX_AGE","AUTH_EMAIL_ALLOW_REGEX",
+             "GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","JWT_SECRET",
+             "ENCRYPTION_SECRET","CSRF_SECRET","D1_DATABASE_NAME","D1_DATABASE_ID"]
+            | all(.[]; (($env[0][.] // "") | length) > 0)
+          ' >/dev/null || { echo "Required deployment variables are missing"; exit 1; }
 
-      - name: Set Cloudflare Secrets
-        run: |
-          pnpm exec dotenvx run --env-file=.env -- bash -lc '
-            set -euo pipefail
-            [ -n "${JWT_SECRET:-}" ] || { echo "Error: JWT_SECRET is missing"; exit 1; }
-            [ -n "${ENCRYPTION_SECRET:-}" ] || { echo "Error: ENCRYPTION_SECRET is missing"; exit 1; }
-            [ -n "${CSRF_SECRET:-}" ] || { echo "Error: CSRF_SECRET is missing"; exit 1; }
-            [ -n "${GOOGLE_CLIENT_SECRET:-}" ] || { echo "Error: GOOGLE_CLIENT_SECRET is missing"; exit 1; }
-            printf %s "$JWT_SECRET" | wrangler secret put JWT_SECRET
-            printf %s "$ENCRYPTION_SECRET" | wrangler secret put ENCRYPTION_SECRET
-            printf %s "$CSRF_SECRET" | wrangler secret put CSRF_SECRET
-            printf %s "$GOOGLE_CLIENT_SECRET" | wrangler secret put GOOGLE_CLIENT_SECRET
-          '
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          jq --slurpfile env "$env_file" '
+            $env[0] as $e
+            | ($e.AUTH_URL | capture("^https://(?<host>[^/:?#]+)$").host) as $host
+            | ($host | split(".")) as $labels
+            | (if ($labels | length) >= 3 then ($labels[1:] | join(".")) else $host end) as $zone
+            | .vars = ({
+                AUTH_URL: $e.AUTH_URL,
+                AUTH_TRUSTED_ORIGINS: $e.AUTH_TRUSTED_ORIGINS,
+                AUTH_TOKEN_MAX_AGE: ($e.AUTH_TOKEN_MAX_AGE | tonumber),
+                AUTH_EMAIL_ALLOW_REGEX: $e.AUTH_EMAIL_ALLOW_REGEX,
+                NEXTJS_ENV: "production",
+                GOOGLE_CLIENT_ID: $e.GOOGLE_CLIENT_ID,
+                NEXT_PUBLIC_TERMS_URL: $e.NEXT_PUBLIC_TERMS_URL,
+                NEXT_PUBLIC_PRIVACY_POLICY_URL: $e.NEXT_PUBLIC_PRIVACY_POLICY_URL,
+                NEXT_PUBLIC_SUPPORT_EMAIL: $e.NEXT_PUBLIC_SUPPORT_EMAIL
+              } | with_entries(select(.value != null and .value != "")))
+            | .d1_databases = [{
+                binding: "DB",
+                database_name: $e.D1_DATABASE_NAME,
+                database_id: $e.D1_DATABASE_ID
+              }]
+            | .routes = [{ pattern: ($host + "/*"), zone_name: $zone }]
+            | .workers_dev = false
+          ' wrangler.jsonc > "$config_file"
 
-      - name: Deploy to Cloudflare
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+          jq '{JWT_SECRET,ENCRYPTION_SECRET,CSRF_SECRET,GOOGLE_CLIENT_SECRET}' \
+            "$env_file" > "$secrets_file"
+          pnpm exec dotenvx run -f .env -- pnpm exec opennextjs-cloudflare build \
+            --config "$config_file"
+          pnpm exec dotenvx run -f .env -- pnpm exec opennextjs-cloudflare deploy \
+            --config "$config_file" --secrets-file "$secrets_file"
