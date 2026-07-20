@@ -16,3 +16,14 @@ export const requireEnv = <T>(value: T | undefined, name: string): T => {
   return value
 }
 
+export const requireSecret = (
+  value: string | undefined,
+  name: string,
+  minimumBytes = 32,
+): string => {
+  const secret = requireEnv(value, name)
+  if (new TextEncoder().encode(secret).byteLength < minimumBytes) {
+    throw new Error(`Environment variable ${name} must be at least ${minimumBytes} bytes`)
+  }
+  return secret
+}

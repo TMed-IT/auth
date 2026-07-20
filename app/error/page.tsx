@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, Suspense } from "react"
+import { useEffect, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import Link from "next/link"
@@ -11,29 +11,17 @@ import { getErrorMessage, getErrorDetailMessage } from "@/lib/error"
 function ErrorContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const key = searchParams.get("key")
+  const baseMessage = key?.trim() ? getErrorMessage(key) : null
+  const errorCode = searchParams.get("code")
+  const detailMessage = errorCode ? getErrorDetailMessage(errorCode) : null
+  const errorMessage = baseMessage ? detailMessage || baseMessage : null
 
   useEffect(() => {
-    const key = searchParams.get("key")
-    
-    if (!key || key.trim() === "") {
-      router.replace("/not-found")
-      return
-    }
-
-    const baseMessage = getErrorMessage(key)
-    
     if (!baseMessage) {
       router.replace("/not-found")
-      return
     }
-
-    const errorCode = searchParams.get("code")
-    const detailMessage = errorCode ? getErrorDetailMessage(errorCode) : null
-    
-    const message = detailMessage || baseMessage
-    setErrorMessage(message)
-  }, [searchParams, router])
+  }, [baseMessage, router])
 
   if (!errorMessage) {
     return null
@@ -93,4 +81,3 @@ export default function ErrorPage() {
     </Suspense>
   )
 }
-

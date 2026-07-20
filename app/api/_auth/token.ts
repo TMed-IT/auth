@@ -1,25 +1,17 @@
 import * as Iron from 'iron-webcrypto'
-import { getServerEnv, requireEnv } from '@/lib/server/env'
+import { getServerEnv, requireSecret } from '@/lib/server/env'
+import { getAuthBaseDomain } from '@/lib/server/url'
 import { ResponseCookies } from 'next/dist/server/web/spec-extension/cookies'
 
-type IronCrypto = {
-  readonly subtle: {
-    decrypt: (algorithm: AesCbcParams | AesCtrParams | AesGcmParams | AlgorithmIdentifier | RsaOaepParams, key: CryptoKey, data: Uint8Array) => Promise<ArrayBuffer>
-    deriveBits: (algorithm: AlgorithmIdentifier | EcdhKeyDeriveParams | HkdfParams | Pbkdf2Params, baseKey: CryptoKey, length: number) => Promise<ArrayBuffer>
-    encrypt: (algorithm: AesCbcParams | AesCtrParams | AesGcmParams | AlgorithmIdentifier | RsaOaepParams, key: CryptoKey, data: Uint8Array) => Promise<ArrayBuffer>
-    importKey: (format: Exclude<KeyFormat, 'jwk'>, keyData: ArrayBuffer | Uint8Array, algorithm: AesKeyAlgorithm | AlgorithmIdentifier | EcKeyImportParams | HmacImportParams | RsaHashedImportParams, extractable: boolean, keyUsages: KeyUsage[]) => Promise<CryptoKey>
-    sign: (algorithm: AlgorithmIdentifier | EcdsaParams | RsaPssParams, key: CryptoKey, data: Uint8Array) => Promise<ArrayBuffer>
-  }
-  getRandomValues: (array: Uint8Array) => Uint8Array
-}
-
 type EnvShape = {
-  AUTH_COOKIE_DOMAIN?: string
-  AUTH_TOKEN_MAX_AGE?: number | string
   AUTH_URL?: string
-  NODE_ENV?: string
+  NEXTJS_ENV?: string
+  AUTH_TOKEN_MAX_AGE?: number | string
   TEMP_COOKIE_MAX_AGE?: number | string
 }
+
+const HOST_COOKIE_PREFIX = '__Host-'
+const hostCookieName = (name: string) => `${HOST_COOKIE_PREFIX}${name}`
 
 const getEnv = (): EnvShape => {
   if (typeof process === 'undefined' || !process.env) {
@@ -43,72 +35,75 @@ export const validateAuthTokenMaxAge = (value: number | string | undefined, name
 
 const getCookieOptions = () => {
   const env = getEnv()
-  const nodeEnv = env.NODE_ENV || process.env.NODE_ENV || 'development'
-  const isProduction = nodeEnv === 'production'
-  
-  let domain: string | undefined = undefined
-  if (isProduction) {
-    domain = requireEnv(env.AUTH_COOKIE_DOMAIN, 'AUTH_COOKIE_DOMAIN')
-  } else {
-    const authUrl = env.AUTH_URL || process.env.AUTH_URL
-    if (authUrl && (authUrl.includes('localhost') || authUrl.includes('127.0.0.1'))) {
-      domain = undefined
-    } else {
-      domain = env.AUTH_COOKIE_DOMAIN || undefined
-    }
-  }
-  
   const maxAge = validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
-  const secure = isProduction
-  return { domain, maxAge, secure }
+  return { maxAge }
+}
+
+const getLegacyCookieDomain = () => {
+  const baseDomain = getAuthBaseDomain(getEnv())
+  return baseDomain ? `.${baseDomain}` : undefined
+}
+
+const deleteLegacyCookie = (cookies: ResponseCookies, name: string) => {
+  cookies.set(name, '', {
+    path: '/',
+    domain: getLegacyCookieDomain(),
+    maxAge: 0,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+  })
+}
+
+export const deleteLegacyAuthCookie = (cookies: ResponseCookies) => {
+  deleteLegacyCookie(cookies, 'auth_token')
 }
 
 export const setAuthCookie = (cookies: ResponseCookies, token: string) => {
-  const { domain, maxAge, secure } = getCookieOptions()
-  cookies.set('auth_token', token, {
+  const { maxAge } = getCookieOptions()
+  cookies.set(hostCookieName('auth_token'), token, {
     path: '/',
-    domain: domain || undefined,
     maxAge,
     httpOnly: true,
-    secure,
+    secure: true,
     sameSite: 'lax',
   })
+  deleteLegacyAuthCookie(cookies)
 }
 
 export const deleteAuthCookie = (cookies: ResponseCookies) => {
-  const { domain, secure } = getCookieOptions()
-  cookies.set('auth_token', '', {
+  cookies.set(hostCookieName('auth_token'), '', {
     path: '/',
-    domain: domain || undefined,
     maxAge: 0,
     httpOnly: true,
-    secure,
+    secure: true,
     sameSite: 'lax',
   })
+  deleteLegacyAuthCookie(cookies)
 }
 
 export const getAuthCookie = (req: Request) => {
   const cookie = req.headers.get('cookie') || ''
-  const m = cookie.split(/;\s*/).find((p) => p.startsWith('auth_token='))
+  const cookiePrefix = `${hostCookieName('auth_token')}=`
+  const m = cookie.split(/;\s*/).find((p) => p.startsWith(cookiePrefix))
   if (!m) return null
   return decodeURIComponent(m.split('=').slice(1).join('='))
 }
 
 export const setTempCookie = (cookies: ResponseCookies, name: string, value: string, maxAgeSec: number) => {
-  const { domain, secure } = getCookieOptions()
-  cookies.set(name, value, {
+  cookies.set(hostCookieName(name), value, {
     path: '/',
-    domain: domain || undefined,
     maxAge: maxAgeSec,
     httpOnly: true,
-    secure,
+    secure: true,
     sameSite: 'lax',
   })
+  deleteLegacyCookie(cookies, name)
 }
 
 export const readCookie = (req: Request, name: string) => {
   const cookie = req.headers.get('cookie') || ''
-  const m = cookie.split(/;\s*/).find((p) => p.startsWith(name + '='))
+  const m = cookie.split(/;\s*/).find((p) => p.startsWith(hostCookieName(name) + '='))
   if (!m) return null
   const raw = m.split('=').slice(1).join('=')
   try {
@@ -119,15 +114,14 @@ export const readCookie = (req: Request, name: string) => {
 }
 
 export const deleteCookie = (cookies: ResponseCookies, name: string) => {
-  const { domain, secure } = getCookieOptions()
-  cookies.set(name, '', {
+  cookies.set(hostCookieName(name), '', {
     path: '/',
-    domain: domain || undefined,
     maxAge: 0,
     httpOnly: true,
-    secure,
+    secure: true,
     sameSite: 'lax',
   })
+  deleteLegacyCookie(cookies, name)
 }
 
 export const getTempCookieMaxAge = (): number => {
@@ -144,18 +138,18 @@ export const getTempCookieMaxAge = (): number => {
 
 export const setEncryptedTempCookie = async (cookies: ResponseCookies, name: string, value: string, maxAgeSec: number) => {
   const env = getServerEnv<{ ENCRYPTION_SECRET?: string }>()
-  const secret = requireEnv(env.ENCRYPTION_SECRET, 'ENCRYPTION_SECRET')
+  const secret = requireSecret(env.ENCRYPTION_SECRET, 'ENCRYPTION_SECRET')
   
   const options = Iron.clone(Iron.defaults)
   options.ttl = maxAgeSec * 1000
   
-  const encrypted = await Iron.seal(globalThis.crypto as unknown as IronCrypto, value, secret, options)
+  const encrypted = await Iron.seal(value, secret, options)
   setTempCookie(cookies, name, encrypted, maxAgeSec)
 }
 
 export const readEncryptedCookie = async (req: Request, name: string): Promise<string | null> => {
   const env = getServerEnv<{ ENCRYPTION_SECRET?: string }>()
-  const secret = requireEnv(env.ENCRYPTION_SECRET, 'ENCRYPTION_SECRET')
+  const secret = requireSecret(env.ENCRYPTION_SECRET, 'ENCRYPTION_SECRET')
   
   const encrypted = readCookie(req, name)
   if (!encrypted) return null
@@ -164,7 +158,7 @@ export const readEncryptedCookie = async (req: Request, name: string): Promise<s
   options.ttl = getTempCookieMaxAge() * 1000
   
   try {
-    const result = await Iron.unseal(globalThis.crypto as unknown as IronCrypto, encrypted, secret, options)
+    const result = await Iron.unseal(encrypted, secret, options)
     return typeof result === 'string' ? result : null
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -187,16 +181,10 @@ const computeSessionBinding = async (sessionData: string): Promise<string> => {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32)
 }
 
-export const generateCsrfTokenWithBinding = async (sessionBinding: string): Promise<string> => {
-  const randomToken = generateCsrfToken()
-  const binding = await computeSessionBinding(sessionBinding)
-  return `${randomToken}:${binding}`
-}
-
 export const setCsrfTokenCookie = async (cookies: ResponseCookies, token: string, sessionBinding?: string): Promise<string> => {
   const env = getServerEnv<{ CSRF_SECRET?: string }>()
-  const secret = requireEnv(env.CSRF_SECRET, 'CSRF_SECRET')
-  const { domain, maxAge, secure } = getCookieOptions()
+  const secret = requireSecret(env.CSRF_SECRET, 'CSRF_SECRET')
+  const { maxAge } = getCookieOptions()
   
   let tokenToEncrypt = token
   if (sessionBinding) {
@@ -207,46 +195,23 @@ export const setCsrfTokenCookie = async (cookies: ResponseCookies, token: string
   const options = Iron.clone(Iron.defaults)
   options.ttl = maxAge * 1000
   
-  const encrypted = await Iron.seal(globalThis.crypto as unknown as IronCrypto, tokenToEncrypt, secret, options)
-  cookies.set('csrf_token', encrypted, {
+  const encrypted = await Iron.seal(tokenToEncrypt, secret, options)
+  cookies.set(hostCookieName('csrf_token'), encrypted, {
     path: '/',
-    domain: domain || undefined,
     maxAge,
     httpOnly: true,
-    secure,
+    secure: true,
     sameSite: 'lax',
   })
+  deleteLegacyCookie(cookies, 'csrf_token')
   return encrypted
-}
-
-export const getEncryptedCsrfTokenFromCookie = (req: Request): string | null => {
-  return readCookie(req, 'csrf_token')
-}
-
-export const getCsrfTokenFromCookie = async (req: Request): Promise<string | null> => {
-  const env = getServerEnv<{ CSRF_SECRET?: string }>()
-  const secret = requireEnv(env.CSRF_SECRET, 'CSRF_SECRET')
-  
-  const encrypted = readCookie(req, 'csrf_token')
-  if (!encrypted) return null
-  
-  const { maxAge } = getCookieOptions()
-  const options = Iron.clone(Iron.defaults)
-  options.ttl = maxAge * 1000
-  
-  try {
-    const result = await Iron.unseal(globalThis.crypto as unknown as IronCrypto, encrypted, secret, options)
-    return typeof result === 'string' ? result : null
-  } catch {
-    return null
-  }
 }
 
 export const verifyCsrfToken = async (req: Request, encryptedTokenFromRequest: string | null, expectedSessionBinding?: string): Promise<boolean> => {
   if (!encryptedTokenFromRequest) return false
   
   const env = getServerEnv<{ CSRF_SECRET?: string }>()
-  const secret = requireEnv(env.CSRF_SECRET, 'CSRF_SECRET')
+  const secret = requireSecret(env.CSRF_SECRET, 'CSRF_SECRET')
   
   const encryptedTokenFromCookie = readCookie(req, 'csrf_token')
   if (!encryptedTokenFromCookie) return false
@@ -258,40 +223,11 @@ export const verifyCsrfToken = async (req: Request, encryptedTokenFromRequest: s
   options.ttl = maxAge * 1000
   
   try {
-    const tokenFromCookie = await Iron.unseal(globalThis.crypto as unknown as IronCrypto, encryptedTokenFromCookie, secret, options)
-    const tokenFromRequest = await Iron.unseal(globalThis.crypto as unknown as IronCrypto, encryptedTokenFromRequest, secret, options)
+    const tokenFromCookie = await Iron.unseal(encryptedTokenFromCookie, secret, options)
+    const tokenFromRequest = await Iron.unseal(encryptedTokenFromRequest, secret, options)
     
     if (typeof tokenFromCookie !== 'string' || typeof tokenFromRequest !== 'string') return false
     if (tokenFromCookie !== tokenFromRequest) return false
-    
-    if (expectedSessionBinding) {
-      const parts = tokenFromCookie.split(':')
-      if (parts.length !== 2) return false
-      const expectedBinding = await computeSessionBinding(expectedSessionBinding)
-      if (parts[1] !== expectedBinding) return false
-    }
-    
-    return true
-  } catch {
-    return false
-  }
-}
-
-export const verifyCsrfTokenFromCookie = async (req: Request, expectedSessionBinding?: string): Promise<boolean> => {
-  const env = getServerEnv<{ CSRF_SECRET?: string }>()
-  const secret = requireEnv(env.CSRF_SECRET, 'CSRF_SECRET')
-  
-  const encryptedTokenFromCookie = readCookie(req, 'csrf_token')
-  if (!encryptedTokenFromCookie) return false
-  
-  const { maxAge } = getCookieOptions()
-  const options = Iron.clone(Iron.defaults)
-  options.ttl = maxAge * 1000
-  
-  try {
-    const tokenFromCookie = await Iron.unseal(globalThis.crypto as unknown as IronCrypto, encryptedTokenFromCookie, secret, options)
-    
-    if (typeof tokenFromCookie !== 'string') return false
     
     if (expectedSessionBinding) {
       const parts = tokenFromCookie.split(':')

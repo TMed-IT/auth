@@ -1,16 +1,25 @@
-import { deleteCookie, readEncryptedCookie, setAuthCookie, generateCsrfToken, setCsrfTokenCookie, verifyCsrfTokenFromCookie, verifyOrigin, validateAuthTokenMaxAge } from '@/app/api/_auth/token'
+import { deleteCookie, readEncryptedCookie, setAuthCookie, generateCsrfToken, setCsrfTokenCookie, verifyCsrfToken, verifyOrigin, validateAuthTokenMaxAge } from '@/app/api/_auth/token'
 import { generateJWT } from '@/app/api/_auth/auth'
 import { getServerEnv, requireEnv } from '@/lib/server/env'
-import { sameDomainRedirectOrFallback } from '@/lib/server/url'
+import { getTrustedAuthOrigin, trustedRedirectOrFallback } from '@/lib/server/url'
 import type { D1Database } from '@/lib/server/d1'
 import { NextRequest, NextResponse } from 'next/server'
 
-type EnvBasic = { FRONTEND_URL?: string; AUTH_URL?: string; AUTH_COOKIE_DOMAIN?: string; AUTH_TOKEN_MAX_AGE?: number | string; DB?: D1Database }
+type EnvBasic = {
+  AUTH_TRUSTED_ORIGINS?: string
+  AUTH_URL?: string
+  AUTH_TOKEN_MAX_AGE?: number | string
+  NEXTJS_ENV?: string
+  DB?: D1Database
+}
 
 type PendingUser = { email: string; given_name?: string; family_name?: string; avatar?: string; redirect?: string }
 
 export async function GET(req: NextRequest) {
-  const response = NextResponse.json({})
+  const response = NextResponse.json(
+    {},
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  )
   const cookies = response.cookies
   
   const pending = await readEncryptedCookie(req, 'pending_user')
@@ -26,18 +35,24 @@ export async function GET(req: NextRequest) {
   
   const csrfToken = generateCsrfToken()
   const sessionBinding = data.email
-  await setCsrfTokenCookie(cookies, csrfToken, sessionBinding)
-  return response
+  const encryptedToken = await setCsrfTokenCookie(cookies, csrfToken, sessionBinding)
+  return NextResponse.json({ csrfToken: encryptedToken }, { headers: response.headers })
 }
 
 export async function POST(req: NextRequest) {
   const env = getServerEnv<EnvBasic>()
-  const response = NextResponse.json({ success: true })
+  const response = NextResponse.json(
+    { success: true },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  )
   const cookies = response.cookies
   
-  const authUrl = requireEnv(env.AUTH_URL, 'AUTH_URL')
-  const frontendUrl = requireEnv(env.FRONTEND_URL, 'FRONTEND_URL')
-  const allowedOrigins = [authUrl, frontendUrl].filter(Boolean)
+  requireEnv(env.AUTH_URL, 'AUTH_URL')
+  const authOrigin = getTrustedAuthOrigin(env)
+  if (!authOrigin) {
+    throw new Error('AUTH_URL must be HTTPS (HTTP is allowed only for localhost)')
+  }
+  const allowedOrigins = [authOrigin]
   
   if (!verifyOrigin(req, allowedOrigins)) {
     return NextResponse.json({ error: 'invalid_origin' }, { status: 403 })
@@ -55,9 +70,22 @@ export async function POST(req: NextRequest) {
   let data: PendingUser | null = null
   try { data = JSON.parse(pending) as PendingUser } catch {}
   if (!data || !data.email) return NextResponse.json({ error: 'invalid_pending_user' }, { status: 400 })
+
+  let body: {
+    csrfToken?: string
+    agreedToTerms?: boolean
+    agreedToPrivacy?: boolean
+  } = {}
+  try {
+    body = (await req.json()) as typeof body
+  } catch {}
+  if (body.agreedToTerms !== true || body.agreedToPrivacy !== true) {
+    return NextResponse.json({ error: 'consent_required' }, { status: 400 })
+  }
   
   const sessionBinding = data.email
-  if (!(await verifyCsrfTokenFromCookie(req, sessionBinding))) {
+  const csrfToken = typeof body.csrfToken === 'string' ? body.csrfToken : null
+  if (!(await verifyCsrfToken(req, csrfToken, sessionBinding))) {
     return NextResponse.json({ error: 'csrf_token_invalid' }, { status: 403 })
   }
 
@@ -100,9 +128,9 @@ export async function POST(req: NextRequest) {
     const jwt = await generateJWT({ id, email: data.email, name, avatar: avatarValue }, authTokenMaxAge)
     setAuthCookie(cookies, jwt)
     deleteCookie(cookies, 'pending_user')
+    deleteCookie(cookies, 'csrf_token')
 
-    const fallback = requireEnv(env.FRONTEND_URL, 'FRONTEND_URL')
-    const location = sameDomainRedirectOrFallback((data.redirect as string) || null, fallback, env)
+    const location = trustedRedirectOrFallback((data.redirect as string) || null, env)
     
     return NextResponse.json({ success: true, redirect: location }, { headers: response.headers })
   } catch (error) {

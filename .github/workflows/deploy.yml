@@ -39,8 +39,7 @@ jobs:
           
           config.vars = {
             'AUTH_URL': process.env.AUTH_URL,
-            'FRONTEND_URL': process.env.FRONTEND_URL,
-            'AUTH_COOKIE_DOMAIN': process.env.AUTH_COOKIE_DOMAIN,
+            'AUTH_TRUSTED_ORIGINS': process.env.AUTH_TRUSTED_ORIGINS,
             'AUTH_TOKEN_MAX_AGE': process.env.AUTH_TOKEN_MAX_AGE,
             'AUTH_EMAIL_ALLOW_REGEX': process.env.AUTH_EMAIL_ALLOW_REGEX,
             'NEXTJS_ENV': process.env.NEXTJS_ENV,
@@ -96,4 +95,3 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
-

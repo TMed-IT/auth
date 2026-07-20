@@ -39,7 +39,11 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     try {
       const rawRedirect = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('redirect')
-      await startSignin(normalizeRedirectParam(rawRedirect))
+      const referrer = typeof document !== 'undefined' ? document.referrer : null
+      const redirect =
+        normalizeRedirectParam(rawRedirect) ??
+        normalizeRedirectParam(referrer)
+      await startSignin(redirect)
     } catch (error) {
       console.error("Login error:", error)
     }

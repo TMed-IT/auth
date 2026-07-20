@@ -17,6 +17,7 @@ export default function ConsentPage() {
   const [submitting, setSubmitting] = useState(false)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
+  const [csrfToken, setCsrfToken] = useState<string | null>(null)
   
   const termsUrl = process.env.NEXT_PUBLIC_TERMS_URL
   const privacyPolicyUrl = process.env.NEXT_PUBLIC_PRIVACY_POLICY_URL
@@ -32,7 +33,14 @@ export default function ConsentPage() {
         if (!response.ok) {
           const { key, code } = await getErrorKeyFromResponse(response)
           redirectToError(key, code)
+          return
         }
+        const result = await response.json() as { csrfToken?: string }
+        if (typeof result.csrfToken !== 'string') {
+          redirectToError('consent_server_error')
+          return
+        }
+        setCsrfToken(result.csrfToken)
       } catch (error) {
         console.error('CSRF token fetch failed:', error)
         redirectToError('consent_network_error')
@@ -44,7 +52,7 @@ export default function ConsentPage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (submitting || !agreedToTerms || !agreedToPrivacy) return
+    if (submitting || !agreedToTerms || !agreedToPrivacy || !csrfToken) return
     setSubmitting(true)
     
     try {
@@ -54,7 +62,11 @@ export default function ConsentPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          csrfToken,
+          agreedToTerms: true,
+          agreedToPrivacy: true,
+        }),
       })
       
       if (!response.ok) {
@@ -170,7 +182,7 @@ export default function ConsentPage() {
 
             <button
               type="submit"
-              disabled={submitting || !agreedToTerms || !agreedToPrivacy}
+              disabled={submitting || !agreedToTerms || !agreedToPrivacy || !csrfToken}
               className="w-full rounded-xl bg-white text-[#1f1f1f] hover:bg-zinc-100 disabled:opacity-70 disabled:pointer-events-none shadow-sm border border-zinc-200 py-4 px-4 transition-colors flex items-center justify-center gap-3 text-sm font-medium"
             >
               {submitting ? (
@@ -193,6 +205,5 @@ export default function ConsentPage() {
     </div>
   )
 }
-
 
 

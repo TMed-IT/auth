@@ -1,6 +1,6 @@
 ## Mahora Auth
 
-Next.js 15（App Router）と Cloudflare Workers（OpenNext）上で動作する Google OAuth 2.0 + PKCE 認証サービスです。Cloudflare D1 に登録済みのユーザーのみを許可し、JWT を HttpOnly Cookie に保存してサブドメイン間で共有します。
+Next.js（App Router）と Cloudflare Workers（OpenNext）上で動作する Google OAuth 2.0 + PKCE 認証サービスです。Cloudflare D1 に登録済みのユーザーのみを許可し、JWT を認証ホスト専用の HttpOnly Cookie に保存します。
 
 ## 技術スタック
 
@@ -36,7 +36,7 @@ sequenceDiagram
         D1-->>Auth: ユーザー情報
         Auth->>Auth: JWT発行
         Auth->>Auth: auth_token Cookie設定
-        Auth-->>Client: 302 リダイレクト<br/>(redirect or FRONTEND_URL)
+        Auth-->>Client: 302 リダイレクト<br/>(redirect or トップドメイン)
     else 未登録ユーザー
         D1-->>Auth: レコードなし
         Auth->>Auth: pending_user Cookie設定<br/>(暗号化)
@@ -72,19 +72,20 @@ sequenceDiagram
 ```
 
 1. **POST `/auth/signin/google`**  
-   - 任意の `redirect`（同一ドメイン HTTPS のみ許可）を受け取り、Google 認可 URL を JSON で返却。  
+   - 任意の `redirect`（トップドメイン、または `AUTH_TRUSTED_ORIGINS` から生成されたOriginと完全一致するURLのみ許可）を受け取り、Google 認可 URL を JSON で返却。
    - `oauth_state` / `oauth_nonce` / `pkce_verifier` / `oauth_redirect` を HttpOnly 一時 Cookie に保存。
 2. **Google OAuth**  
    - `AUTH_URL/auth/callback/google` にリダイレクト。PKCE + state + nonce を検証し、ID トークン検証と `userinfo` 取得を実施。
 3. **利用可否判定**  
    - `AUTH_EMAIL_ALLOW_REGEX` に一致し、メール検証済みであることを確認。  
-   - D1 に既存レコードがあれば JWT を発行し、`auth_token` Cookie をセットして許可されたリダイレクト先（存在しない場合は `FRONTEND_URL`）へ 302。
+   - D1 に既存レコードがあれば JWT を発行し、`auth_token` Cookie をセットして許可されたリダイレクト先（存在しない場合はサブドメインなしのトップドメイン）へ 302。
 4. **未登録ユーザーの同意フロー**  
    - レコードが無い場合は `pending_user`（暗号化）Cookieを発行し、`/consent` ページへ 302。  
    - **GET `/auth/consent`** で CSRF トークンを払い出し（`csrf_token` Cookie + レスポンス Body）。  
-   - **POST `/auth/consent`** でユーザー同意を受け取り、D1 に作成→JWT 発行→`FRONTEND_URL` もしくは `pending_user.redirect` へ遷移。
+   - **POST `/auth/consent`** でユーザー同意を受け取り、D1 に作成→JWT 発行→`pending_user.redirect`、存在しない場合はトップドメインへ遷移。
 5. **セッション確認**  
-   - **GET `/auth/session`** は `auth_token` を検証し、D1 から `id`/`email`/`given_name`/`family_name`/`display_name`/`created_at` を返却。無効時は `user: null`。
+   - **GET `/auth/session`** は認証ホスト専用Cookieを検証し、D1 から `id`/`email`/`given_name`/`family_name`/`display_name`/`created_at` を返却。無効時は `user: null`。
+   - 許可された別Originからは `credentials: 'include'` 付きで呼び出します。レスポンスは資格情報付きCORSに対応します。
 6. **サインアウト**  
    - **GET `/auth/signout`** で `auth_token` を検証し、ユーザー ID にバインドした CSRF トークンを払い出し。  
    - **POST `/auth/signout`** で CSRF と Origin を検証後 `auth_token` を削除。
@@ -103,11 +104,12 @@ sequenceDiagram
 
 ## Cookie とセキュリティ
 
-- `auth_token`：HS256 JWT。`AUTH_COOKIE_DOMAIN` 全域で共有。`SameSite=Lax`、`Secure` は `NODE_ENV=production` 時のみ、`Max-Age = AUTH_TOKEN_MAX_AGE`。
-- 一時 Cookie：`oauth_state`, `oauth_nonce`, `pkce_verifier`, `oauth_redirect`。寿命は `TEMP_COOKIE_MAX_AGE`（未指定時 180 秒）。
-- `pending_user`：`ENCRYPTION_SECRET` で Iron 暗号化。メールアドレスと `redirect` を保持。
-- `csrf_token`：`CSRF_SECRET` で暗号化し、メールまたはユーザー ID のハッシュにバインド。`GET` で配布し、`POST` 時に Cookie とボディの一致・Origin を必須化。
-- `redirect` パラメータは `AUTH_COOKIE_DOMAIN` 配下の HTTPS URL のみ許可し、無効な場合は `FRONTEND_URL` へフォールバックします。
+- `__Host-auth_token`：HS256 JWT。認証ホスト専用で、`Secure` / `HttpOnly` / `SameSite=Lax` / `Path=/` を常に付与。`Max-Age = AUTH_TOKEN_MAX_AGE`。
+- 一時 Cookie：`__Host-oauth_state`, `__Host-oauth_nonce`, `__Host-pkce_verifier`, `__Host-oauth_redirect`。寿命は `TEMP_COOKIE_MAX_AGE`（未指定時 180 秒）。
+- `__Host-pending_user`：`ENCRYPTION_SECRET` で Iron 暗号化。メールアドレスと `redirect` を保持。
+- `__Host-csrf_token`：`CSRF_SECRET` で暗号化し、メールまたはユーザー ID のハッシュにバインド。`GET` でCookieとレスポンスBodyへ配布し、`POST` 時に両者の一致・Originを検証。
+- `redirect` パラメータはトップドメイン、または `AUTH_TRUSTED_ORIGINS` から生成されたOriginと完全一致するHTTPS URLのみ許可します。`NEXTJS_ENV=development` の場合だけ localhost のHTTPも許可します。
+- 旧 `auth_token` などの親ドメインCookieは移行時に削除され、認証には使用されません。
 
 ## D1 スキーマ
 
@@ -131,8 +133,6 @@ CREATE TABLE IF NOT EXISTS users (
 | 変数 | 説明 | 例 |
 | ---- | ---- | -- |
 | `AUTH_URL` | この認証サービスの公開 URL | `https://auth.example.com` |
-| `FRONTEND_URL` | 認証後に戻す SPA/サイト | `https://example.com` |
-| `AUTH_COOKIE_DOMAIN` | 共有 Cookie のルートドメイン（`.` から開始推奨） | `.example.com` |
 | `AUTH_TOKEN_MAX_AGE` | `auth_token` / CSRF トークン寿命（秒） | `604800` |
 | `AUTH_EMAIL_ALLOW_REGEX` | 許可メール判定の正規表現 | `^.+@example\\.com$` |
 | `NEXTJS_ENV` | OpenNext ビルドモード | `production` または `development` |
@@ -152,7 +152,45 @@ CREATE TABLE IF NOT EXISTS users (
 | 変数 | 説明 | 既定値 |
 | ---- | ---- | ------ |
 | `TEMP_COOKIE_MAX_AGE` | 一時 Cookie（state, nonce, pending_user）の寿命（秒） | `180` |
-| `NODE_ENV` | `production` の場合のみ Cookie に `Secure` を付与 | `development` |
+| `AUTH_TRUSTED_ORIGINS` | 追加で許可するサブドメインラベル。カンマ区切り | 未指定 |
+
+### 複数サブドメインから利用する場合
+
+認証サービスを `auth.example.com`、フロントエンドを `app.example.com`、`admin.example.com`、`portal.example.com` で利用する場合は、次のようにOriginを完全一致で登録します。
+
+```dotenv
+AUTH_URL=https://auth.example.com
+AUTH_TRUSTED_ORIGINS=app,admin,portal
+```
+
+- 利用するフロントエンドのサブドメインラベルを、`AUTH_TRUSTED_ORIGINS` にカンマ区切りで指定します。
+- `AUTH_URL=https://auth.example.com` の場合、`app` は `https://app.example.com`、`admin` は `https://admin.example.com` として扱われます。
+- 戻り先が取得できない場合は、`AUTH_URL` から先頭ラベルを除いた `https://example.com/` へ戻ります。トップドメインは自動的に許可されます。
+- ラベルには英小文字・数字・ハイフンだけを使用できます。完全URL、ドット、パス、ワイルドカードは指定できません。
+- `NEXTJS_ENV=development` の場合に限り、`localhost` または `localhost:3001` の形式も指定できます。この場合はHTTP Originとして扱われます。
+- 各フロントエンドは認証サービスの `/auth/signin/google`、`/auth/session`、`/auth/signout` を `credentials: "include"` 付きで呼び出します。
+- セッションCookieは `auth.example.com` 専用です。各サブドメインへCookieや `JWT_SECRET` を共有する必要はありません。
+- 旧親ドメインCookieの削除対象Domainも `AUTH_URL` から自動算出されます。
+- `/auth/signin/google` を各サブドメインから直接呼ぶと、サーバーが `Referer` または `Origin` から許可済みの戻り先を自動判別し、短時間有効な `__Host-oauth_redirect` HttpOnly Cookieへ保存します。認証・初回同意の完了後にCookieを削除して元のサブドメインへ戻ります。
+- Referrer Policyによりパスが送信されない場合でも、`Origin` から元のサブドメインを判別できます。元のパス・クエリまで確実に復元したい場合だけ、リクエストBodyの `redirect` に現在のURLを指定します。
+
+search paramsを使わず、元のサブドメインを自動判別させるログイン例:
+
+```ts
+const response = await fetch(
+  "https://auth.example.com/auth/signin/google",
+  {
+    method: "POST",
+    credentials: "include",
+  },
+);
+if (!response.ok) throw new Error("Failed to start sign in");
+
+const { authUrl } = (await response.json()) as { authUrl: string };
+window.location.assign(authUrl);
+```
+
+ログイン開始・セッション確認・サインアウトの実装例は [token_reference.md](./token_reference.md) を参照してください。
 
 **注意**: これらの環境変数は `.env` ファイルに設定し、暗号化してリポジトリにコミットします。ローカル開発時は `.env.local` に設定してください。
 
@@ -260,6 +298,6 @@ GitHub リポジトリの Settings → Secrets and variables → Actions で以�
 
 ## その他補足
 
-- `auth_token` のペイロード: `sub`, `email`, `name`, `picture`, `iat`, `exp`。`name` は `family_name + ' ' + given_name`。
-- `sameDomainRedirectOrFallback` により `http://` や別ドメインが渡された際は常に `FRONTEND_URL` に戻ります。
-- `verifyOrigin` によって `POST /auth/consent` と `POST /auth/signout` は `AUTH_URL`/`FRONTEND_URL` からのリクエストのみ許可されます。
+- `__Host-auth_token` のペイロード: `sub`, `email`, `name`, `avatar`, `iat`, `exp`。`name` は `family_name + ' ' + given_name`。
+- `trustedRedirectOrFallback` により、許可リスト外のOriginが渡された際は常に `AUTH_URL` から算出したトップドメインに戻ります。
+- `POST /auth/consent` は `AUTH_URL` のみ、`POST /auth/signout` は `AUTH_URL` と信頼済みフロントエンドOriginのみ許可します。
