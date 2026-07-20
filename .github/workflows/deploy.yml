@@ -51,12 +51,17 @@ jobs:
           trap 'rm -f "$env_file" "$secrets_file" "$config_file"' EXIT
 
           pnpm exec dotenvx get -f .env --format=json > "$env_file"
-          jq -en --slurpfile env "$env_file" '
+          missing_variables="$(jq -nr --slurpfile env "$env_file" '
             ["AUTH_URL","AUTH_TOKEN_MAX_AGE","AUTH_EMAIL_ALLOW_REGEX",
              "GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","JWT_SECRET",
              "ENCRYPTION_SECRET","CSRF_SECRET","D1_DATABASE_NAME","D1_DATABASE_ID"]
-            | all(.[]; (($env[0][.] // "") | length) > 0)
-          ' >/dev/null || { echo "Required deployment variables are missing"; exit 1; }
+            | map(select((($env[0][.] // "") | length) == 0))
+            | join(", ")
+          ')"
+          if [[ -n "$missing_variables" ]]; then
+            echo "Missing deployment variables: $missing_variables"
+            exit 1
+          fi
 
           jq --slurpfile env "$env_file" '
             $env[0] as $e
