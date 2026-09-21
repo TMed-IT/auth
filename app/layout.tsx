@@ -1,21 +1,43 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { CSSProperties } from "react";
 import "./globals.css";
 import { BackgroundDecoration } from "@/components/ui/background";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import siteConfig from "@site-config";
 
 export const metadata: Metadata = {
-  title: "Mahora Auth",
+  title: siteConfig.metadata.title,
+  icons: {
+    icon: [{ url: siteConfig.brand.faviconPath, type: "image/svg+xml" }],
+    shortcut: siteConfig.brand.faviconPath,
+  },
 };
+
+const themeStyle = {
+  "--background": siteConfig.theme.background,
+  "--auth-background-secondary": siteConfig.theme.backgroundSecondary,
+  "--foreground": siteConfig.theme.foreground,
+  "--card": siteConfig.theme.surface,
+  "--card-foreground": siteConfig.theme.foreground,
+  "--popover": siteConfig.theme.surface,
+  "--popover-foreground": siteConfig.theme.foreground,
+  "--primary": siteConfig.theme.primary,
+  "--auth-primary-strong": siteConfig.theme.primaryStrong,
+  "--primary-foreground": siteConfig.theme.primaryForeground,
+  "--secondary": siteConfig.theme.surfaceStrong,
+  "--secondary-foreground": siteConfig.theme.foreground,
+  "--muted": siteConfig.theme.surfaceStrong,
+  "--muted-foreground": siteConfig.theme.mutedForeground,
+  "--accent": siteConfig.theme.primary,
+  "--accent-foreground": siteConfig.theme.primaryForeground,
+  "--destructive": siteConfig.theme.danger,
+  "--border": siteConfig.theme.border,
+  "--input": siteConfig.theme.border,
+  "--ring": siteConfig.theme.primary,
+  "--auth-success": siteConfig.theme.success,
+  "--auth-warning": siteConfig.theme.warning,
+  "--auth-danger": siteConfig.theme.danger,
+  colorScheme: "dark",
+} as CSSProperties;
 
 export default function RootLayout({
   children,
@@ -23,10 +45,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="bg-black">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black`}
-      >
+    <html lang={siteConfig.metadata.language} className="bg-background" style={themeStyle}>
+      <body className="bg-background text-foreground antialiased">
         <BackgroundDecoration />
         {children}
       </body>

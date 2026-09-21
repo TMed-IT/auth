@@ -6,7 +6,7 @@ import { ResponseCookies } from 'next/dist/server/web/spec-extension/cookies'
 type EnvShape = {
   AUTH_URL?: string
   NEXTJS_ENV?: string
-  AUTH_TOKEN_MAX_AGE?: number | string
+  SESSION_MAX_AGE?: number | string
   TEMP_COOKIE_MAX_AGE?: number | string
 }
 
@@ -22,7 +22,7 @@ const getEnv = (): EnvShape => {
   return { ...nodeEnv, ...(g.env ?? {}) }
 }
 
-export const validateAuthTokenMaxAge = (value: number | string | undefined, name: string): number => {
+export const validateSessionMaxAge = (value: number | string | undefined, name = 'SESSION_MAX_AGE'): number => {
   if (value === undefined || value === null || value === '') {
     throw new Error(`Environment variable ${name} is not set`)
   }
@@ -35,7 +35,7 @@ export const validateAuthTokenMaxAge = (value: number | string | undefined, name
 
 const getCookieOptions = () => {
   const env = getEnv()
-  const maxAge = validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
+  const maxAge = validateSessionMaxAge(env.SESSION_MAX_AGE)
   return { maxAge }
 }
 
@@ -57,11 +57,18 @@ const deleteLegacyCookie = (cookies: ResponseCookies, name: string) => {
 
 export const deleteLegacyAuthCookie = (cookies: ResponseCookies) => {
   deleteLegacyCookie(cookies, 'auth_token')
+  cookies.set(hostCookieName('auth_token'), '', {
+    path: '/',
+    maxAge: 0,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+  })
 }
 
-export const setAuthCookie = (cookies: ResponseCookies, token: string) => {
+export const setSessionCookie = (cookies: ResponseCookies, sessionId: string) => {
   const { maxAge } = getCookieOptions()
-  cookies.set(hostCookieName('auth_token'), token, {
+  cookies.set(hostCookieName('session'), sessionId, {
     path: '/',
     maxAge,
     httpOnly: true,
@@ -71,8 +78,8 @@ export const setAuthCookie = (cookies: ResponseCookies, token: string) => {
   deleteLegacyAuthCookie(cookies)
 }
 
-export const deleteAuthCookie = (cookies: ResponseCookies) => {
-  cookies.set(hostCookieName('auth_token'), '', {
+export const deleteSessionCookie = (cookies: ResponseCookies) => {
+  cookies.set(hostCookieName('session'), '', {
     path: '/',
     maxAge: 0,
     httpOnly: true,
@@ -82,12 +89,17 @@ export const deleteAuthCookie = (cookies: ResponseCookies) => {
   deleteLegacyAuthCookie(cookies)
 }
 
-export const getAuthCookie = (req: Request) => {
+export const getSessionCookie = (req: Request) => {
   const cookie = req.headers.get('cookie') || ''
-  const cookiePrefix = `${hostCookieName('auth_token')}=`
+  const cookiePrefix = `${hostCookieName('session')}=`
   const m = cookie.split(/;\s*/).find((p) => p.startsWith(cookiePrefix))
   if (!m) return null
-  return decodeURIComponent(m.split('=').slice(1).join('='))
+  const raw = m.split('=').slice(1).join('=')
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 export const setTempCookie = (cookies: ResponseCookies, name: string, value: string, maxAgeSec: number) => {
@@ -275,8 +287,8 @@ export const verifyOrigin = (req: Request, allowedOrigins: string[]): boolean =>
 
 try {
   const env = getEnv()
-  if (env.AUTH_TOKEN_MAX_AGE !== undefined && env.AUTH_TOKEN_MAX_AGE !== null && env.AUTH_TOKEN_MAX_AGE !== '') {
-    validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
+  if (env.SESSION_MAX_AGE !== undefined && env.SESSION_MAX_AGE !== null && env.SESSION_MAX_AGE !== '') {
+    validateSessionMaxAge(env.SESSION_MAX_AGE)
   }
 } catch (error) {
   if (error instanceof Error) {

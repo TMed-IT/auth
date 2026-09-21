@@ -1,24 +1,20 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+import path from "node:path";
 
-const requiredPublicEnvVars = [
-  "NEXT_PUBLIC_TERMS_URL",
-  "NEXT_PUBLIC_PRIVACY_POLICY_URL",
-  "NEXT_PUBLIC_SUPPORT_EMAIL",
-] as const;
-
-for (const envVar of requiredPublicEnvVars) {
-  if (!process.env[envVar]) {
-    throw new Error(`環境変数 ${envVar} が設定されていません`);
-  }
+const siteTarget = process.env.SITE_CONFIG ?? "external";
+if (siteTarget !== "external" && siteTarget !== "internal") {
+  throw new Error(`SITE_CONFIG must be "external" or "internal": ${siteTarget}`);
 }
+const siteConfigPath = path.resolve(process.cwd(), `config/${siteTarget}.ts`);
+const siteConfigModule = `./config/${siteTarget}.ts`;
 
 const isProduction = process.env.NODE_ENV === "production";
 const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https://lh3.googleusercontent.com",
+  "img-src 'self' data:",
   "font-src 'self'",
   `connect-src 'self'${isProduction ? "" : " ws: http: https:"}`,
   "object-src 'none'",
@@ -64,6 +60,23 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  agentRules: false,
+  distDir: isProduction ? ".next" : `.next/${siteTarget}`,
+  images: {
+    unoptimized: true,
+  },
+  turbopack: {
+    resolveAlias: {
+      "@site-config": siteConfigModule,
+    },
+  },
+  webpack(config) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "@site-config$": siteConfigPath,
+    };
+    return config;
+  },
   async headers() {
     return [
       {
@@ -76,4 +89,16 @@ const nextConfig: NextConfig = {
 
 export default nextConfig;
 
-initOpenNextCloudflareForDev();
+if (process.env.NODE_ENV !== "production") {
+  const wranglerConfigPath = process.env.WRANGLER_CONFIG_PATH;
+  if (!wranglerConfigPath) {
+    throw new Error("WRANGLER_CONFIG_PATH is required during local development");
+  }
+  initOpenNextCloudflareForDev({
+    configPath: path.resolve(process.cwd(), wranglerConfigPath),
+    persist: {
+      // Wrangler's --persist-to appends /v3; getPlatformProxy uses this path as-is.
+      path: path.resolve(process.cwd(), `.wrangler/state/${siteTarget}/v3`),
+    },
+  });
+}

@@ -2,7 +2,7 @@ import { createGoogleAuthUrl, generateCodeChallenge, generateCodeVerifier, gener
 import { getTempCookieMaxAge, setTempCookie, verifyOrigin } from '@/app/api/_auth/token'
 import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server/cors'
 import { getServerEnv, requireEnv } from '@/lib/server/env'
-import { getTrustedAuthOrigin, getTrustedFrontendOrigins, trustedRedirectOrNull } from '@/lib/server/url'
+import { getTrustedAuthOrigin, getTrustedFrontendOrigins, trustedAuthFlowRedirectOrNull } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 
 type SigninEnv = {
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   ]
   const redirect =
     redirectCandidates
-      .map((candidate) => trustedRedirectOrNull(candidate, env))
+      .map((candidate) => trustedAuthFlowRedirectOrNull(candidate, env))
       .find((candidate): candidate is string => candidate !== null) ?? null
 
   const authUrl = requireEnv(env.AUTH_URL, 'AUTH_URL')

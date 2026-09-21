@@ -1,9 +1,16 @@
-import { exchangeCodeForToken, getGoogleUserInfo, verifyGoogleIdToken, generateJWT } from '@/app/api/_auth/auth'
-import { deleteCookie, getTempCookieMaxAge, readCookie, setAuthCookie, setEncryptedTempCookie, validateAuthTokenMaxAge } from '@/app/api/_auth/token'
+import { exchangeCodeForToken, getGoogleUserInfo, verifyGoogleIdToken } from '@/app/api/_auth/auth'
+import { deleteCookie, getTempCookieMaxAge, readCookie, setEncryptedTempCookie, setSessionCookie, validateSessionMaxAge } from '@/app/api/_auth/token'
 import { getServerEnv, requireEnv } from '@/lib/server/env'
-import { trustedRedirectOrFallback } from '@/lib/server/url'
+import { trustedAuthFlowRedirectOrFallback } from '@/lib/server/url'
 import type { D1Database } from '@/lib/server/d1'
 import { NextRequest, NextResponse } from 'next/server'
+import siteConfig from '@site-config'
+import { decideUserAccess } from '@/lib/auth-policy'
+import { createSession } from '@/lib/server/sessions'
+import { validateGoogleOAuthCallback } from '@/lib/google-oauth-callback'
+import type { ErrorCode } from '@/config/site'
+import { normalizeAvatarPath } from '@/lib/avatar'
+import { copyGoogleAvatarToR2 } from '@/lib/server/avatars'
 
 const validateEmailRegex = (email: string, pattern: string) => {
   try {
@@ -20,9 +27,10 @@ type EnvBasic = {
   NEXTJS_ENV?: string
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
-  AUTH_TOKEN_MAX_AGE?: number | string
+  SESSION_MAX_AGE?: number | string
   AUTH_EMAIL_ALLOW_REGEX?: string
   DB?: D1Database
+  AVATARS?: CloudflareEnv['AVATARS']
 }
 
 export async function GET(req: NextRequest) {
@@ -30,62 +38,109 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
+  const providerError = url.searchParams.get('error')
   const storedState = readCookie(req, 'oauth_state')
   const storedNonce = readCookie(req, 'oauth_nonce')
   const storedVerifier = readCookie(req, 'pkce_verifier')
   const pendingRedirect = readCookie(req, 'oauth_redirect')
 
-  const response = NextResponse.json(
-    {},
-    { headers: { 'Cache-Control': 'private, no-store' } },
-  )
+  const response = new NextResponse(null, {
+    headers: { 'Cache-Control': 'private, no-store' },
+  })
   const cookies = response.cookies
   deleteCookie(cookies, 'oauth_state')
   deleteCookie(cookies, 'oauth_nonce')
   deleteCookie(cookies, 'pkce_verifier')
   deleteCookie(cookies, 'oauth_redirect')
-  const errorResponse = (error: string, status: number) =>
-    NextResponse.json({ error }, { status, headers: response.headers })
-
-  if (!code || !state || !storedState || !storedNonce || !storedVerifier || state !== storedState) {
-    return errorResponse('invalid_state', 400)
+  const authUrl = requireEnv(env.AUTH_URL, 'AUTH_URL')
+  const errorResponse = (error: ErrorCode) => {
+    const errorUrl = new URL('/error', authUrl)
+    errorUrl.searchParams.set('key', 'oauth_error')
+    errorUrl.searchParams.set('code', error)
+    return NextResponse.redirect(errorUrl, { status: 302, headers: response.headers })
   }
 
-  const authUrl = requireEnv(env.AUTH_URL, 'AUTH_URL')
+  const callback = validateGoogleOAuthCallback({
+    code,
+    state,
+    providerError,
+    storedState,
+    storedNonce,
+    storedVerifier,
+  })
+  if (!callback.ok) {
+    return errorResponse(callback.error)
+  }
+
   const googleClientId = requireEnv(env.GOOGLE_CLIENT_ID, 'GOOGLE_CLIENT_ID')
   const googleClientSecret = requireEnv(env.GOOGLE_CLIENT_SECRET, 'GOOGLE_CLIENT_SECRET')
-  const authEmailAllowRegex = requireEnv(env.AUTH_EMAIL_ALLOW_REGEX, 'AUTH_EMAIL_ALLOW_REGEX')
-  
-  const redirectUri = `${authUrl}/auth/callback/google`
-  const tokenData = await exchangeCodeForToken(code, String(googleClientId), String(googleClientSecret), redirectUri, storedVerifier)
-  if (!tokenData) return errorResponse('token_exchange_failed', 400)
 
-  const idPayload = await verifyGoogleIdToken(tokenData.idToken, String(googleClientId), storedNonce)
-  if (!idPayload) return errorResponse('invalid_id_token', 401)
+  const redirectUri = `${authUrl}/auth/callback/google`
+  const tokenData = await exchangeCodeForToken(callback.code, String(googleClientId), String(googleClientSecret), redirectUri, callback.verifier)
+  if (!tokenData) return errorResponse('token_exchange_failed')
+
+  const idPayload = await verifyGoogleIdToken(tokenData.idToken, String(googleClientId), callback.nonce)
+  if (!idPayload) return errorResponse('invalid_id_token')
 
   const googleUser = await getGoogleUserInfo(tokenData.accessToken)
-  if (!googleUser) return errorResponse('userinfo_failed', 400)
-  if (idPayload.sub !== googleUser.id) return errorResponse('identity_mismatch', 401)
+  if (!googleUser) return errorResponse('userinfo_failed')
+  if (idPayload.sub !== googleUser.id) return errorResponse('identity_mismatch')
   if (idPayload.email && idPayload.email.toLowerCase() !== googleUser.email.toLowerCase()) {
-    return errorResponse('identity_mismatch', 401)
+    return errorResponse('identity_mismatch')
   }
-  if (googleUser.emailVerified !== true) return errorResponse('email_not_verified', 403)
+  if (googleUser.emailVerified !== true) return errorResponse('email_not_verified')
 
-  if (!validateEmailRegex(googleUser.email, String(authEmailAllowRegex))) {
-    return errorResponse('email_not_allowed', 403)
+  if (siteConfig.auth.allowSelfRegistration) {
+    const authEmailAllowRegex = requireEnv(env.AUTH_EMAIL_ALLOW_REGEX, 'AUTH_EMAIL_ALLOW_REGEX')
+    if (!validateEmailRegex(googleUser.email, String(authEmailAllowRegex))) {
+      return errorResponse('email_not_allowed')
+    }
   }
+
+  const avatarBucket = env.AVATARS
+  if (!avatarBucket) return errorResponse('server_configuration_error')
 
   const db = env.DB as D1Database
-  type UserRow = { id: string; email: string; given_name: string; family_name: string; avatar: string | null }
+  type UserRow = {
+    id: string | null
+    email: string
+    given_name: string | null
+    family_name: string | null
+    avatar: string | null
+    consented_at: string | null
+  }
   
   try {
-    const existing = await db.prepare('SELECT * FROM users WHERE email = ?').bind(googleUser.email).first<UserRow>()
-    if (!existing) {
+    const userQuery =
+      'SELECT id, email, given_name, family_name, avatar, consented_at FROM users WHERE email = ?'
+    const existing = await db.prepare(userQuery).bind(googleUser.email).first<UserRow>()
+
+    const accessDecision = decideUserAccess(existing, siteConfig.auth.allowSelfRegistration)
+    if (accessDecision === 'reject') {
+      return errorResponse('email_not_allowlisted')
+    }
+
+    let avatarPath = normalizeAvatarPath(existing?.avatar)
+    try {
+      avatarPath = await copyGoogleAvatarToR2(
+        avatarBucket,
+        googleUser.email,
+        googleUser.picture,
+      ) ?? avatarPath
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'avatar_sync_failed',
+        error: error instanceof Error ? error.message : String(error),
+      }))
+    }
+
+    if (accessDecision === 'consent') {
       const tmp = {
         email: googleUser.email,
         given_name: googleUser.given_name || '',
         family_name: googleUser.family_name || '',
-        avatar: googleUser.picture || '',
+        display_name: googleUser.name || '',
+        avatar: avatarPath || '',
         redirect: pendingRedirect || '',
       }
       await setEncryptedTempCookie(cookies, 'pending_user', JSON.stringify(tmp), getTempCookieMaxAge())
@@ -93,21 +148,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(consentUrl, { status: 302, headers: response.headers })
     }
 
-    const avatarUrl = googleUser.picture || null
-    if (avatarUrl && avatarUrl !== existing.avatar) {
-      await db.prepare('UPDATE users SET avatar = ? WHERE id = ?').bind(avatarUrl, existing.id).run()
+    if (!existing?.id) return errorResponse('database_error')
+
+    if (avatarPath !== existing.avatar) {
+      await db.prepare('UPDATE users SET avatar = ? WHERE id = ?').bind(avatarPath, existing.id).run()
     }
 
-    const authTokenMaxAge = validateAuthTokenMaxAge(env.AUTH_TOKEN_MAX_AGE, 'AUTH_TOKEN_MAX_AGE')
-    const name = `${existing.family_name} ${existing.given_name}`
-    const avatar = avatarUrl || existing.avatar || undefined
-    const jwt = await generateJWT({ id: existing.id, email: existing.email, name, avatar }, authTokenMaxAge)
-    setAuthCookie(cookies, jwt)
-    const location = trustedRedirectOrFallback(pendingRedirect, env)
+    const maxAge = validateSessionMaxAge(env.SESSION_MAX_AGE)
+    const sessionId = await createSession(db, existing.id, maxAge)
+    setSessionCookie(cookies, sessionId)
+    const location = trustedAuthFlowRedirectOrFallback(pendingRedirect, env)
     return NextResponse.redirect(location, { status: 302, headers: response.headers })
   } catch (dbError) {
     console.error('Database error:', dbError)
     deleteCookie(cookies, 'pending_user')
-    return errorResponse('database_error', 500)
+    return errorResponse('database_error')
   }
 }

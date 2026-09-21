@@ -1,303 +1,220 @@
-## Mahora Auth
+# TMed-IT Auth
 
-Next.js（App Router）と Cloudflare Workers（OpenNext）上で動作する Google OAuth 2.0 + PKCE 認証サービスです。Cloudflare D1 に登録済みのユーザーのみを許可し、JWT を認証ホスト専用の HttpOnly Cookie に保存します。
+Next.jsとCloudflare Workersで動く認証サービスです。Google OAuth 2.0とパスキーに対応し、セッションとユーザー情報はCloudflare D1、Googleプロフィール画像はR2で管理します。
 
-## 技術スタック
+同じコードから、用途の異なる2つのサイトをビルドします。
 
-- Next.js 15 / React 19 / TypeScript / App Router
-- OpenNext for Cloudflare + Worker runtime（Edge）
-- Cloudflare D1（ユーザー情報の永続化）
-- Tailwind CSS v4, framer-motion, lucide-react
-- Iron (iron-webcrypto) を用いた Cookie 暗号化・CSRF トークン保護
+| サイト | 利用できるユーザー | Worker / D1 / R2 |
+| --- | --- | --- |
+| external | `AUTH_EMAIL_ALLOW_REGEX` に一致するGoogleアカウント。未登録者は同意後に作成する | `auth-external` |
+| internal | D1の `users.email` に事前登録されたアカウント | `auth-internal` |
 
-## 認証フロー
+- [ローカルで起動する](#ローカルで起動する)
+- [Google OAuthを設定する](#google-oauthを設定する)
+- [環境変数](#環境変数)
+- [API](#api)
+- [デプロイ](#デプロイ)
 
-```mermaid
-sequenceDiagram
-    participant Client as クライアント
-    participant Auth as 認証サービス
-    participant Google as Google OAuth
-    participant D1 as Cloudflare D1
+## サイトごとの表示を変更する
 
-    Note over Client,D1: サインイン
-    Client->>Auth: POST /auth/signin/google<br/>(redirect パラメータ)
-    Auth->>Auth: PKCE verifier生成<br/>state/nonce生成<br/>一時Cookie保存
-    Auth-->>Client: {authUrl: "https://accounts.google.com/..."}
-    Client->>Google: リダイレクト（認可リクエスト）
-    Google->>Client: 認証完了後リダイレクト<br/>(code + state)
-    Client->>Auth: GET /auth/callback/google<br/>(code + state)
-    Auth->>Auth: PKCE + state + nonce検証
-    Auth->>Google: IDトークン検証<br/>userinfo取得
-    Google-->>Auth: ユーザー情報
-    Auth->>Auth: メール検証<br/>(AUTH_EMAIL_ALLOW_REGEX)
-    Auth->>D1: ユーザー検索
-    
-    alt 既存ユーザー
-        D1-->>Auth: ユーザー情報
-        Auth->>Auth: JWT発行
-        Auth->>Auth: auth_token Cookie設定
-        Auth-->>Client: 302 リダイレクト<br/>(redirect or トップドメイン)
-    else 未登録ユーザー
-        D1-->>Auth: レコードなし
-        Auth->>Auth: pending_user Cookie設定<br/>(暗号化)
-        Auth-->>Client: 302 /consent
-        Client->>Auth: GET /auth/consent
-        Auth->>Auth: CSRFトークン生成
-        Auth-->>Client: {csrfToken: "..."}<br/>(Cookie + Body)
-        Client->>Auth: POST /auth/consent<br/>(同意 + CSRF)
-        Auth->>Auth: CSRF検証<br/>Origin検証
-        Auth->>D1: ユーザー作成
-        D1-->>Auth: 作成完了
-        Auth->>Auth: JWT発行
-        Auth->>Auth: auth_token Cookie設定
-        Auth-->>Client: {success: true, redirect: "..."}
-    end
+サイト固有の組織名、ロゴ、favicon、配色、規約URL、ログイン案内は [`config/external.ts`](./config/external.ts) と [`config/internal.ts`](./config/internal.ts) にあります。共通の文言と問い合わせ先は [`config/site.ts`](./config/site.ts) で管理します。
 
-    Note over Client,D1: セッション確認
-    Client->>Auth: GET /auth/session
-    Auth->>Auth: auth_token検証
-    Auth->>D1: ユーザー情報取得
-    D1-->>Auth: ユーザー情報
-    Auth-->>Client: {user: {...}} or {user: null}
+画像は [`brand`](./brand) から各設定ファイルへimportします。ビルド時に `@site-config` が一方の設定だけを読み込むため、選ばなかったサイトの画像は成果物に含まれません。
 
-    Note over Client,D1: サインアウト
-    Client->>Auth: GET /auth/signout
-    Auth->>Auth: auth_token検証
-    Auth->>Auth: CSRFトークン生成<br/>(ユーザーIDにバインド)
-    Auth-->>Client: {csrfToken: "..."}<br/>(Cookie + Body)
-    Client->>Auth: POST /auth/signout<br/>(CSRF)
-    Auth->>Auth: CSRF検証<br/>Origin検証
-    Auth->>Auth: auth_token Cookie削除
-    Auth-->>Client: {success: true}
+## ローカルで起動する
+
+Node.js 24とpnpmを使用します。
+
+```bash
+pnpm install
 ```
 
-1. **POST `/auth/signin/google`**  
-   - 任意の `redirect`（トップドメイン、または `AUTH_TRUSTED_ORIGINS` から生成されたOriginと完全一致するURLのみ許可）を受け取り、Google 認可 URL を JSON で返却。
-   - `oauth_state` / `oauth_nonce` / `pkce_verifier` / `oauth_redirect` を HttpOnly 一時 Cookie に保存。
-2. **Google OAuth**  
-   - `AUTH_URL/auth/callback/google` にリダイレクト。PKCE + state + nonce を検証し、ID トークン検証と `userinfo` 取得を実施。
-3. **利用可否判定**  
-   - `AUTH_EMAIL_ALLOW_REGEX` に一致し、メール検証済みであることを確認。  
-   - D1 に既存レコードがあれば JWT を発行し、`auth_token` Cookie をセットして許可されたリダイレクト先（存在しない場合はサブドメインなしのトップドメイン）へ 302。
-4. **未登録ユーザーの同意フロー**  
-   - レコードが無い場合は `pending_user`（暗号化）Cookieを発行し、`/consent` ページへ 302。  
-   - **GET `/auth/consent`** で CSRF トークンを払い出し（`csrf_token` Cookie + レスポンス Body）。  
-   - **POST `/auth/consent`** でユーザー同意を受け取り、D1 に作成→JWT 発行→`pending_user.redirect`、存在しない場合はトップドメインへ遷移。
-5. **セッション確認**  
-   - **GET `/auth/session`** は認証ホスト専用Cookieを検証し、D1 から `id`/`email`/`given_name`/`family_name`/`display_name`/`created_at` を返却。無効時は `user: null`。
-   - 許可された別Originからは `credentials: 'include'` 付きで呼び出します。レスポンスは資格情報付きCORSに対応します。
-6. **サインアウト**  
-   - **GET `/auth/signout`** で `auth_token` を検証し、ユーザー ID にバインドした CSRF トークンを払い出し。  
-   - **POST `/auth/signout`** で CSRF と Origin を検証後 `auth_token` を削除。
+`.env.external.local` または `.env.internal.local` を作り、[環境変数](#環境変数)を設定します。`ENCRYPTION_SECRET` と `CSRF_SECRET` は未設定なら起動時に生成されます。再起動後も処理中の一時Cookieを維持したい場合は、それぞれに32バイト以上の固定値を設定してください。
 
-## API エンドポイント一覧
-
-| Method | Path | 内容 | 代表的なレスポンス |
-| ------ | ---- | ---- | ------------------ |
-| POST | `/auth/signin/google` | 認可開始。PKCE 用 Cookie 設定。 | `{"authUrl": "https://accounts.google.com/..."}` |
-| GET | `/auth/callback/google` | Google コールバック処理。JWT を発行 or `/consent` へ 302。 | 302 / JSON エラー |
-| GET | `/auth/consent` | 暗号化 CSRF トークン払い出し。 | `{"csrfToken": "<encrypted>"}` |
-| POST | `/auth/consent` | 同意確定。必要に応じて D1 にユーザー作成。 | `{"success": true, "redirect": "https://..."}` |
-| GET | `/auth/session` | JWT + D1 によりセッション取得。 | `{"user": {...}}` or `{"user": null}` |
-| GET | `/auth/signout` | サインアウト用 CSRF トークン払い出し。 | `{"csrfToken": "<encrypted>"}` |
-| POST | `/auth/signout` | CSRF / Origin 検証後に Cookie 削除。 | `{"success": true}` |
-
-## Cookie とセキュリティ
-
-- `__Host-auth_token`：HS256 JWT。認証ホスト専用で、`Secure` / `HttpOnly` / `SameSite=Lax` / `Path=/` を常に付与。`Max-Age = AUTH_TOKEN_MAX_AGE`。
-- 一時 Cookie：`__Host-oauth_state`, `__Host-oauth_nonce`, `__Host-pkce_verifier`, `__Host-oauth_redirect`。寿命は `TEMP_COOKIE_MAX_AGE`（未指定時 180 秒）。
-- `__Host-pending_user`：`ENCRYPTION_SECRET` で Iron 暗号化。メールアドレスと `redirect` を保持。
-- `__Host-csrf_token`：`CSRF_SECRET` で暗号化し、メールまたはユーザー ID のハッシュにバインド。`GET` でCookieとレスポンスBodyへ配布し、`POST` 時に両者の一致・Originを検証。
-- `redirect` パラメータはトップドメイン、または `AUTH_TRUSTED_ORIGINS` から生成されたOriginと完全一致するHTTPS URLのみ許可します。`NEXTJS_ENV=development` の場合だけ localhost のHTTPも許可します。
-- 旧 `auth_token` などの親ドメインCookieは移行時に削除され、認証には使用されません。
-
-## D1 スキーマ
-
-```sql
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY NOT NULL,
-  email TEXT UNIQUE NOT NULL,
-  given_name TEXT NOT NULL,
-  family_name TEXT NOT NULL,
-  display_name TEXT NULL,
-  created_at DATETIME NOT NULL
-);
+```bash
+openssl rand -base64 32
 ```
 
-スキーマの適用方法は「npm スクリプト」セクションを参照してください。
+D1へスキーマを適用してから起動します。
 
-## 環境変数一覧
+```bash
+# external: http://localhost:3000
+pnpm run db:schema:external
+pnpm run dev:external
 
-### 必須環境変数
+# internal: http://localhost:3001
+pnpm run db:schema:internal
+pnpm run dev:internal
+```
 
-| 変数 | 説明 | 例 |
-| ---- | ---- | -- |
-| `AUTH_URL` | この認証サービスの公開 URL | `https://auth.example.com` |
-| `AUTH_TOKEN_MAX_AGE` | `auth_token` / CSRF トークン寿命（秒） | `604800` |
-| `AUTH_EMAIL_ALLOW_REGEX` | 許可メール判定の正規表現 | `^.+@example\\.com$` |
-| `NEXTJS_ENV` | OpenNext ビルドモード | `production` または `development` |
-| `GOOGLE_CLIENT_ID` | Google OAuth クライアント ID | - |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth クライアント Secret | - |
-| `JWT_SECRET` | `auth_token` 署名用のシークレット（HS256） | - |
-| `ENCRYPTION_SECRET` | `pending_user` など Iron 暗号化用のシークレット | - |
-| `CSRF_SECRET` | `csrf_token` の暗号化/復号用のシークレット | - |
-| `NEXT_PUBLIC_TERMS_URL` | 利用規約の URL | `https://example.com/terms` |
-| `NEXT_PUBLIC_PRIVACY_POLICY_URL` | プライバシーポリシーの URL | `https://example.com/privacy` |
-| `NEXT_PUBLIC_SUPPORT_EMAIL` | サポートメールアドレス | `support@example.com` |
-| `D1_DATABASE_NAME` | D1 データベース名 | - |
-| `D1_DATABASE_ID` | D1 データベース ID | - |
+両方を同時に起動できます。Next.jsの出力先とローカルD1・R2の保存先はサイトごとに分かれています。別のポートを使う場合は、対応する `.env.<site>.local` の `AUTH_URL` を変更してください。
 
-### 任意環境変数
+## Google OAuthを設定する
 
-| 変数 | 説明 | 既定値 |
-| ---- | ---- | ------ |
-| `TEMP_COOKIE_MAX_AGE` | 一時 Cookie（state, nonce, pending_user）の寿命（秒） | `180` |
-| `AUTH_TRUSTED_ORIGINS` | 追加で許可するサブドメインラベル。カンマ区切り | 未指定 |
+[Google Auth PlatformのClients画面](https://console.cloud.google.com/auth/clients)で「ウェブ アプリケーション」のOAuthクライアントを作成し、発行された値を `GOOGLE_CLIENT_ID` と `GOOGLE_CLIENT_SECRET` に設定します。
 
-### 複数サブドメインから利用する場合
+Google側には次のURLを登録します。
 
-認証サービスを `auth.example.com`、フロントエンドを `app.example.com`、`admin.example.com`、`portal.example.com` で利用する場合は、次のようにOriginを完全一致で登録します。
+| 環境 | Authorized JavaScript origins | Authorized redirect URIs |
+| --- | --- | --- |
+| external（ローカル） | `http://localhost:3000` | `http://localhost:3000/auth/callback/google` |
+| internal（ローカル） | `http://localhost:3001` | `http://localhost:3001/auth/callback/google` |
+| 本番 | `AUTH_URL` のOrigin | `${AUTH_URL}/auth/callback/google` |
+
+認可コードをサーバー側で交換するため、動作に必須なのはAuthorized redirect URIsです。Authorized JavaScript originsは、同じクライアントでブラウザ向けGoogle Identity Servicesを使う場合に備えて認証ホストのOriginへそろえます。
+
+リダイレクトURIは、スキーム、ホスト、ポート、パス、末尾のスラッシュまで完全一致させてください。`AUTH_TRUSTED_ORIGINS` に登録したフロントエンドのURLはGoogle側へ登録する必要はありません。本番では、Google Auth PlatformのAuthorized domainsにもルートドメインを追加します。
+
+## 認証データの扱い
+
+externalはメールアドレスを `AUTH_EMAIL_ALLOW_REGEX` で確認し、未登録者を同意画面へ進めます。internalはD1の許可名簿にないアカウントを拒否します。どちらも同意済みのユーザーだけがセッションとパスキーを利用できます。
+
+セッションCookieにはランダム値だけを保存し、D1にはそのSHA-256ハッシュを保存します。`GET /me` は呼び出すたびにセッションの有効期限、ユーザーの存在、同意状態を確認します。
+
+Googleプロフィール画像は、正規化したメールアドレスのSHA-256ハッシュをキーとしてR2へコピーします。同じユーザーの再ログインでは同じオブジェクトを上書きするため、保存される画像は1ユーザーにつき1つです。D1にはGoogleのURLではなく `/avatar/<hash>` を保存します。
+
+パスキーの登録後は、端末と認証器から推定した名前を表示します。利用者は保存前に変更できます。認証チャレンジはD1で一度だけ消費し、同じ署名の再送や同時送信によるセッション再発行を防ぎます。
+
+## internalの許可名簿へ追加する
+
+ローカルD1へ追加します。複数のメールアドレスも指定できます。
+
+```bash
+pnpm run whitelist:add:internal -- user@example.com
+```
+
+本番D1へ追加する場合は `--remote` を付けます。
+
+```bash
+pnpm run whitelist:add:internal -- user@example.com --remote
+```
+
+既存のユーザー情報は上書きしません。
+
+## フロントエンドから利用する
+
+利用元のサブドメインラベルをカンマ区切りで指定します。
 
 ```dotenv
 AUTH_URL=https://auth.example.com
 AUTH_TRUSTED_ORIGINS=app,admin,portal
 ```
 
-- 利用するフロントエンドのサブドメインラベルを、`AUTH_TRUSTED_ORIGINS` にカンマ区切りで指定します。
-- `AUTH_URL=https://auth.example.com` の場合、`app` は `https://app.example.com`、`admin` は `https://admin.example.com` として扱われます。
-- 戻り先が取得できない場合は、`AUTH_URL` から先頭ラベルを除いた `https://example.com/` へ戻ります。トップドメインは自動的に許可されます。
-- ラベルには英小文字・数字・ハイフンだけを使用できます。完全URL、ドット、パス、ワイルドカードは指定できません。
-- `NEXTJS_ENV=development` の場合に限り、`localhost` または `localhost:3001` の形式も指定できます。この場合はHTTP Originとして扱われます。
-- 各フロントエンドは認証サービスの `/auth/signin/google`、`/auth/session`、`/auth/signout` を `credentials: "include"` 付きで呼び出します。
-- セッションCookieは `auth.example.com` 専用です。各サブドメインへCookieや `JWT_SECRET` を共有する必要はありません。
-- 旧親ドメインCookieの削除対象Domainも `AUTH_URL` から自動算出されます。
-- `/auth/signin/google` を各サブドメインから直接呼ぶと、サーバーが `Referer` または `Origin` から許可済みの戻り先を自動判別し、短時間有効な `__Host-oauth_redirect` HttpOnly Cookieへ保存します。認証・初回同意の完了後にCookieを削除して元のサブドメインへ戻ります。
-- Referrer Policyによりパスが送信されない場合でも、`Origin` から元のサブドメインを判別できます。元のパス・クエリまで確実に復元したい場合だけ、リクエストBodyの `redirect` に現在のURLを指定します。
+この例では `https://app.example.com` などが許可されます。ラベルには英小文字、数字、ハイフンを使用できます。完全なURL、ドット、パス、ワイルドカードは指定できません。開発環境では `localhost` と `localhost:<port>` も使用できます。
 
-search paramsを使わず、元のサブドメインを自動判別させるログイン例:
+ブラウザからAPIを呼ぶときは `credentials: "include"` を付けます。認証後に元のページへ戻す場合は、`POST /auth/signin/google` のJSON本文へ `redirect` を渡してください。指定がない場合は `Referer`、`Origin`、`AUTH_DEFAULT_REDIRECT_URL` の順に戻り先を決めます。
 
-```ts
-const response = await fetch(
-  "https://auth.example.com/auth/signin/google",
-  {
-    method: "POST",
-    credentials: "include",
-  },
-);
-if (!response.ok) throw new Error("Failed to start sign in");
+クライアント側の実装例は [`token_reference.md`](./token_reference.md) を参照してください。
 
-const { authUrl } = (await response.json()) as { authUrl: string };
-window.location.assign(authUrl);
-```
+## API
 
-ログイン開始・セッション確認・サインアウトの実装例は [token_reference.md](./token_reference.md) を参照してください。
+| Method | Path | 内容 |
+| --- | --- | --- |
+| `POST` | `/auth/signin/google` | Google認可URLを発行する |
+| `GET` | `/auth/callback/google` | Googleの応答を検証し、ログインまたは同意画面へ進める |
+| `GET` | `/auth/consent` | 同意用のCSRFトークンとアカウント情報を返す |
+| `POST` | `/auth/consent` | 同意を記録し、セッションを作成する |
+| `GET` | `/me` | セッションと同意状態を検証し、現在のユーザーを返す |
+| `GET` | `/avatar/:hash` | R2のプロフィール画像を配信する |
+| `GET` | `/auth/signout` | サインアウト用のCSRFトークンを発行する |
+| `POST` | `/auth/signout` | セッションを失効させる |
+| `POST` | `/auth/passkey/authentication/options` | パスキー認証チャレンジを発行する |
+| `POST` | `/auth/passkey/authentication/verify` | 署名を検証してセッションを作成する |
+| `POST` | `/auth/passkey/registration/options` | パスキー登録オプションを発行する |
+| `POST` | `/auth/passkey/registration/verify` | パスキーを検証して保存する |
+| `GET` | `/auth/passkeys` | 登録済みパスキーを返す |
+| `PATCH` | `/auth/passkeys/:credentialId` | パスキーの表示名を変更する |
+| `DELETE` | `/auth/passkeys/:credentialId` | パスキーを削除する |
+| `GET` | `/auth/emdash/authorize` | EmDash向けの短寿命認可コードを発行する |
+| `POST` | `/auth/emdash/token` | PKCEを検証して認可コードを交換する |
 
-**注意**: これらの環境変数は `.env` ファイルに設定し、暗号化してリポジトリにコミットします。ローカル開発時は `.env.local` に設定してください。
+EmDashのコールバックURLは `https://<site-domain>/_emdash/api/auth/callback` に固定されています。EmDashのサブドメインラベルも `AUTH_TRUSTED_ORIGINS` に追加してください。
 
-## 環境変数管理（dotenvx）
+## 環境変数
 
-このプロジェクトでは [dotenvx](https://github.com/dotenvx/dotenvx) を使用して環境変数を管理します。
+### 必須
 
-### ローカル開発用
+| 変数 | 説明 |
+| --- | --- |
+| `AUTH_URL` | 認証サービスのOrigin |
+| `SESSION_MAX_AGE` | セッションの有効期間（秒） |
+| `GOOGLE_CLIENT_ID` | Google OAuthクライアントID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuthクライアントシークレット |
+| `D1_DATABASE_NAME` | D1名。`auth-external` または `auth-internal` |
+| `D1_DATABASE_ID` | D1 ID |
+| `R2_AVATAR_BUCKET_NAME` | R2バケット名。`D1_DATABASE_NAME` と同じ値 |
 
-- `.env.local` に環境変数を設定（gitignore に含まれます）
-- `.env` を参考に必要な環境変数を設定してください
+externalでは `AUTH_EMAIL_ALLOW_REGEX` も必須です。
 
-### 本番用（暗号化）
+### 任意
 
-- `.env` ファイルを直接暗号化してリポジトリにコミットします
-- 暗号化キーは GitHub Secrets の `DOTENVX_KEY` に保存します
-- ローカル開発時は `.env.local` を使用します（`.env` は暗号化されているため使用不可）
+| 変数 | 説明 | 既定値 |
+| --- | --- | --- |
+| `AUTH_DEFAULT_REDIRECT_URL` | 戻り元がない場合の遷移先 | `AUTH_URL` から算出したトップドメイン |
+| `AUTH_TRUSTED_ORIGINS` | 利用を許可するサブドメインラベル | 未指定 |
+| `TEMP_COOKIE_MAX_AGE` | OAuth・同意用Cookieの有効期間（秒） | `180` |
+| `NEXTJS_ENV` | `development` または `production` | URLから自動判定 |
+| `ENCRYPTION_SECRET` | 一時Cookieの暗号鍵 | 開発時・デプロイ時に生成 |
+| `CSRF_SECRET` | CSRFトークンの暗号鍵 | 開発時・デプロイ時に生成 |
 
-### 環境変数の管理方法
+## dotenvxで環境ファイルを管理する
 
-#### 環境変数の追加・更新
-
-`dotenvx set` コマンドを使用して環境変数を追加・更新します:
+本番用の値は `.env.external` と `.env.internal` に暗号化してコミットします。復号鍵は、それぞれ `DOTENV_PRIVATE_KEY_EXTERNAL` と `DOTENV_PRIVATE_KEY_INTERNAL` です。ローカル専用の平文値はGit管理外の `.env.external.local` または `.env.internal.local` に置きます。
 
 ```bash
-pnpm exec dotenvx set KEY=value --file .env
+pnpm exec dotenvx set KEY=value --file .env.external
+pnpm exec dotenvx encrypt --file .env.external
+
+pnpm exec dotenvx set KEY=value --file .env.internal
+pnpm exec dotenvx encrypt --file .env.internal
 ```
 
-複数の環境変数を一度に設定する場合:
+## よく使うコマンド
+
+| コマンド | 内容 |
+| --- | --- |
+| `pnpm run dev:external` | externalをポート3000で起動する |
+| `pnpm run dev:internal` | internalをポート3001で起動する |
+| `pnpm run build:external` | externalをビルドする |
+| `pnpm run build:internal` | internalをビルドする |
+| `pnpm run deploy:external` | externalをデプロイする |
+| `pnpm run deploy:internal` | internalをデプロイする |
+| `pnpm run db:schema:<site>` | ローカルD1へスキーマを適用する |
+| `pnpm run db:list:<site>` | ローカルD1のユーザーを表示する |
+| `pnpm run db:reset:<site>` | ローカルD1の対象テーブルを作り直す |
+| `pnpm run whitelist:add:internal -- <email>` | internalの許可名簿へ追加する |
+| `pnpm lint` | ESLintを実行する |
+| `pnpm test` | テストを実行する |
+| `pnpm run cf-typegen` | Cloudflare bindingの型を生成する |
+
+`<site>` は `external` または `internal` です。`db:reset:*` は対象テーブルのデータを削除します。
+
+## デプロイ
+
+GitHub Organizationの **Settings → Secrets and variables → Actions** に次のOrganization Secretsを登録し、このリポジトリから利用できるようにします。
+
+| Secret | 用途 |
+| --- | --- |
+| `DOTENV_PRIVATE_KEY_EXTERNAL` | `.env.external` の復号 |
+| `DOTENV_PRIVATE_KEY_INTERNAL` | `.env.internal` の復号 |
+
+`CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` もGitHub Secretsへ登録します。APIトークンにはWorkers Scripts Edit、D1 Edit、Workers R2 Storage Editが必要です。
+
+`main` へのpush時にlint、型検査、テスト、依存関係の監査を実行し、成功後にexternalとinternalをデプロイします。各ジョブはR2バケットを必要に応じて作成し、D1へ [`schema.sql`](./schema.sql) を適用します。
+
+手元からデプロイする場合はWranglerへログインして実行します。
 
 ```bash
-pnpm exec dotenvx set KEY1=value1 KEY2=value2 --file .env
+pnpm run deploy:external
+pnpm run deploy:internal
 ```
 
-#### `.env` の暗号化
+デプロイのたびに `ENCRYPTION_SECRET` と `CSRF_SECRET` が更新されるため、処理中の同意、パスキー認証、CSRFトークンは失効します。D1のユーザー、セッション、パスキーとR2の画像は残ります。
 
-1. `.env` ファイルに環境変数を設定（`dotenvx set` を使用）
-2. 以下のコマンドで `.env` 自体を暗号化（上書き）:
-   ```bash
-   pnpm exec dotenvx encrypt --file .env
-   ```
-3. 暗号化キーを GitHub Secrets の `DOTENVX_KEY` に設定（初回のみ）
-4. 暗号化された `.env` をコミット
+## セキュリティ上の制約
 
-**注意**: `.env` を暗号化すると、ローカル開発時は使用できなくなります。必ず `.env.local` でローカル用の環境変数を設定してください。
-
-`initOpenNextCloudflareForDev()` により `pnpm run dev` 実行時に Miniflare + ローカル D1 が自動で立ち上がるため、別コマンドでの DB 起動は不要です。
-
-## 開発フロー
-
-1. 依存関係のインストール: `pnpm install`
-2. `.env.local` を作成し上記の値を設定（`.env` を参考）
-3. ローカル D1 にスキーマ適用: `pnpm run db:schema`
-4. 開発サーバー: `pnpm run dev`（`http://localhost:3000` を開く）
-
-## npm スクリプト
-
-- `pnpm run dev` : Next.js 開発サーバー（Turbopack、dotenvx で `.env.local` を使用）
-- `pnpm run build` : Next.js 本番ビルド（dotenvx で環境変数を読み込み）
-- `pnpm run lint` : ESLint
-- `pnpm run deploy` : `opennextjs-cloudflare build` → `deploy`（Workers へ）
-- `pnpm run preview` : 本番と同一バンドルで Cloudflare Preview を起動（dotenvx で環境変数を読み込み）
-- `pnpm run cf-typegen` : `wrangler types` による `cloudflare-env.d.ts` 生成
-- `pnpm run db:schema` : ローカル D1 にスキーマを適用
-- `pnpm run db:reset` : ローカル D1 をリセット（テーブル削除 → 再作成）
-- `pnpm run db:list` : ローカル D1 のデータを確認
-
-**本番 D1 へのスキーマ適用**: `wrangler d1 execute DB --file=./schema.sql`
-
-## デプロイ手順（Cloudflare Workers）
-
-### GitHub Actions 経由（推奨）
-
-#### 必要な設定
-
-GitHub リポジトリの Settings → Secrets and variables → Actions で以下を設定してください。
-
-##### Secrets（機密情報）
-
-| Secret 名 | 説明 | 取得方法 |
-| --------- | ---- | -------- |
-| `DOTENVX_KEY` | `.env` ファイルの復号キー | `dotenvx encrypt` 実行時に生成されるキー |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API トークン | [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) で作成（`Edit Cloudflare Workers` 権限が必要） |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウント ID | [Cloudflare Dashboard](https://dash.cloudflare.com/) の右サイドバーから取得 |
-
-##### 環境変数の設定
-
-必要な環境変数は「環境変数一覧」セクションを参照してください。これらは `.env` ファイルに含めて暗号化してください（GitHub Secrets/Variables には設定不要）。
-
-#### デプロイフロー
-
-1. 上記の Secrets を GitHub に設定
-2. `.env` ファイルに環境変数を設定し、暗号化してコミット
-3. `main` ブランチへの push で自動デプロイが開始されます
-4. GitHub Actions が自動で `.env` を復号し、ビルド・デプロイを実行
-
-### 手動デプロイ
-
-1. `wrangler login` → `wrangler d1 create ...` → `wrangler d1 binding` を完了し、`wrangler.jsonc` の `d1_databases` を更新
-2. `.env` を復号: `pnpm exec dotenvx decrypt --file .env`
-3. `pnpm run build` でビルド
-4. 本番 D1 へスキーマ適用: `wrangler d1 execute DB --file=./schema.sql`
-5. `pnpm run deploy`（Workers にデプロイ）
-6. リハーサルとして `pnpm run preview` で Cloudflare 上の挙動を検証すると安全です
-
-## その他補足
-
-- `__Host-auth_token` のペイロード: `sub`, `email`, `name`, `avatar`, `iat`, `exp`。`name` は `family_name + ' ' + given_name`。
-- `trustedRedirectOrFallback` により、許可リスト外のOriginが渡された際は常に `AUTH_URL` から算出したトップドメインに戻ります。
-- `POST /auth/consent` は `AUTH_URL` のみ、`POST /auth/signout` は `AUTH_URL` と信頼済みフロントエンドOriginのみ許可します。
+- Cookieには `Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/` を設定し、`Domain` は設定しません。
+- 同意とサインアウトではCSRFトークンに加えて `Origin` または `Referer` を検証します。
+- 認証後の遷移先は `AUTH_DEFAULT_REDIRECT_URL`、`AUTH_TRUSTED_ORIGINS`、認証サービス内の許可済みURLに限定します。
+- Googleプロフィール画像はHTTPSの `googleusercontent.com` からのみ取得し、2 MiBを上限とします。
+- 旧JWT Cookieは削除し、認証には使用しません。

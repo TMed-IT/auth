@@ -1,17 +1,16 @@
 import Link from "next/link"
+import siteConfig from "@site-config"
 
 export function SupportLink() {
-  const supportEmail = process.env.NEXT_PUBLIC_SUPPORT_EMAIL
-  const href = supportEmail ? `mailto:${supportEmail}` : "#"
+  const href = `mailto:${siteConfig.publicInfo.supportEmail}`
 
   return (
-    <p className="text-sm text-zinc-500">
-      ご不明な点がある場合は、
+    <p className="text-sm text-muted-foreground">
+      {siteConfig.support.prefix}
       <Link href={href} className="text-primary hover:text-primary/80 ml-1">
-        サポート
+        {siteConfig.support.linkLabel}
       </Link>
       にお問い合わせください
     </p>
   )
 }
-

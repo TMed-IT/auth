@@ -1,14 +1,16 @@
-import { deleteAuthCookie, deleteCookie, deleteLegacyAuthCookie, getAuthCookie, generateCsrfToken, setCsrfTokenCookie, verifyCsrfToken, verifyOrigin } from '@/app/api/_auth/token'
+import { deleteSessionCookie, deleteCookie, deleteLegacyAuthCookie, generateCsrfToken, setCsrfTokenCookie, verifyCsrfToken, verifyOrigin } from '@/app/api/_auth/token'
 import { getServerEnv } from '@/lib/server/env'
-import { verifyJWT } from '@/app/api/_auth/auth'
 import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server/cors'
 import { getTrustedAuthOrigin, getTrustedFrontendOrigins } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
+import type { D1Database } from '@/lib/server/d1'
+import { getSession, revokeSession } from '@/lib/server/sessions'
 
 type SignoutEnv = {
   AUTH_URL?: string
   AUTH_TRUSTED_ORIGINS?: string
   NEXTJS_ENV?: string
+  DB?: D1Database
 }
 
 const getAllowedOrigins = (env: SignoutEnv) => {
@@ -35,20 +37,17 @@ const createSignoutResponse = (
 
 export async function GET(req: NextRequest) {
   const env = getServerEnv<SignoutEnv>()
-  const token = getAuthCookie(req)
-  if (!token) {
-    return createSignoutResponse(req, env, { error: 'not_authenticated' }, 401)
+  if (!env.DB) return createSignoutResponse(req, env, { error: 'database_error' }, 500)
+  const session = await getSession(req, env.DB)
+  if (!session) {
+    const response = createSignoutResponse(req, env, { error: 'not_authenticated' }, 401)
+    deleteSessionCookie(response.cookies)
+    return response
   }
-  
-  const payload = await verifyJWT(token)
-  if (!payload || typeof payload.sub !== 'string') {
-    return createSignoutResponse(req, env, { error: 'invalid_token' }, 401)
-  }
-  
+
   const csrfToken = generateCsrfToken()
-  const sessionBinding = payload.sub
   const cookieResponse = createSignoutResponse(req, env, {})
-  const encryptedToken = await setCsrfTokenCookie(cookieResponse.cookies, csrfToken, sessionBinding)
+  const encryptedToken = await setCsrfTokenCookie(cookieResponse.cookies, csrfToken, session.sessionHash)
   return NextResponse.json(
     { csrfToken: encryptedToken },
     { headers: cookieResponse.headers },
@@ -66,14 +65,12 @@ export async function POST(req: NextRequest) {
     return createSignoutResponse(req, env, { error: 'invalid_origin' }, 403)
   }
   
-  const token = getAuthCookie(req)
-  if (!token) {
-    return createSignoutResponse(req, env, { error: 'not_authenticated' }, 401)
-  }
-  
-  const payload = await verifyJWT(token)
-  if (!payload || typeof payload.sub !== 'string') {
-    return createSignoutResponse(req, env, { error: 'invalid_token' }, 401)
+  if (!env.DB) return createSignoutResponse(req, env, { error: 'database_error' }, 500)
+  const session = await getSession(req, env.DB)
+  if (!session) {
+    const invalidResponse = createSignoutResponse(req, env, { error: 'not_authenticated' }, 401)
+    deleteSessionCookie(invalidResponse.cookies)
+    return invalidResponse
   }
   
   let body: { csrfToken?: string } = {}
@@ -81,12 +78,12 @@ export async function POST(req: NextRequest) {
     body = (await req.json()) as { csrfToken?: string }
   } catch {}
   const csrfTokenFromRequest = typeof body.csrfToken === 'string' ? body.csrfToken : null
-  const sessionBinding = payload.sub
-  if (!(await verifyCsrfToken(req, csrfTokenFromRequest, sessionBinding))) {
+  if (!(await verifyCsrfToken(req, csrfTokenFromRequest, session.sessionHash))) {
     return createSignoutResponse(req, env, { error: 'csrf_token_invalid' }, 403)
   }
   
-  deleteAuthCookie(cookies)
+  await revokeSession(env.DB, session.sessionHash)
+  deleteSessionCookie(cookies)
   deleteCookie(cookies, 'csrf_token')
   return response
 }

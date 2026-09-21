@@ -1,19 +1,20 @@
 import Image from "next/image"
+import siteConfig from "@site-config"
 
 export function Logo() {
   return (
-    <div className="flex items-center justify-center space-x-2">
-      <div className="rounded-full size-12 w-12 overflow-hidden flex items-center justify-center">
-        <Image
-          src="/mahora.png"
-          alt="Mahora"
-          width={48}
-          height={48}
-          className="rounded-full object-cover"
-        />
-      </div>
-      <span className="text-xl font-semibold text-white">Mahora</span>
+    <div className="flex items-center justify-center gap-3">
+      <Image
+        src={siteConfig.brand.logoPath}
+        alt=""
+        width={36}
+        height={36}
+        className="size-9 rounded-lg"
+        priority
+      />
+      <span className="text-lg font-medium tracking-wide text-foreground/80">
+        {siteConfig.brand.organizationName}
+      </span>
     </div>
   )
 }
-

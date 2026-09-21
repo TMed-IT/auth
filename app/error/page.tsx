@@ -4,9 +4,11 @@ import { useEffect, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import Link from "next/link"
-import { LogInIcon, AlertCircle } from "lucide-react"
+import { LogInIcon } from "lucide-react"
+import { AuthCard } from "@/components/ui/auth-card"
 import { Logo } from "@/components/ui/logo"
 import { getErrorMessage, getErrorDetailMessage } from "@/lib/error"
+import siteConfig from "@site-config"
 
 function ErrorContent() {
   const searchParams = useSearchParams()
@@ -28,7 +30,7 @@ function ErrorContent() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -39,36 +41,32 @@ function ErrorContent() {
           <Logo />
         </div>
 
-        <motion.div
+        <AuthCard
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.1 }}
-          className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-2xl p-4"
         >
           <div className="space-y-4 text-center">
             <div>
-              <div className="flex justify-center mb-4">
-                <AlertCircle className="w-16 h-16 text-red-500" />
-              </div>
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4">
-                <p className="text-sm text-red-300 whitespace-pre-wrap">
+              <div className="bg-auth-danger/10 border border-auth-danger/30 rounded-lg p-4 mb-4">
+                <p className="text-sm text-auth-danger whitespace-pre-wrap">
                   {errorMessage}
                 </p>
               </div>
-              <p className="text-zinc-400 text-sm">
-                最初からやり直してください
+              <p className="text-muted-foreground text-sm">
+                {siteConfig.error.retryGuidance}
               </p>
             </div>
 
             <Link
               href="/"
-              className="w-full rounded-xl bg-white text-[#1f1f1f] hover:bg-zinc-100 shadow-sm border border-zinc-200 py-4 px-4 transition-colors flex items-center justify-center gap-3 text-sm font-medium"
+              className="w-full rounded-xl bg-auth-primary-strong text-primary-foreground hover:bg-auth-primary-strong/90 shadow-sm border border-auth-primary-strong py-4 px-4 transition-colors flex items-center justify-center gap-3 text-sm font-medium"
             >
               <LogInIcon className="w-5 h-5" />
-              <span>ログイン画面に戻る</span>
+              <span>{siteConfig.error.backButton}</span>
             </Link>
           </div>
-        </motion.div>
+        </AuthCard>
       </motion.div>
     </div>
   )

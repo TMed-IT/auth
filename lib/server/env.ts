@@ -4,8 +4,9 @@ export const getServerEnv = <T extends Record<string, unknown>>() => {
   if (typeof process === 'undefined' || !process.env) {
     throw new Error('process.env is not available')
   }
-  const { env: cloudflareEnv } = getCloudflareContext()
-  const nodeEnv = process.env as unknown as Partial<T>
+  const { env } = getCloudflareContext()
+  const cloudflareEnv: Record<string, unknown> = { ...env }
+  const nodeEnv: Record<string, unknown> = process.env
   return { ...cloudflareEnv, ...nodeEnv } as T
 }
 

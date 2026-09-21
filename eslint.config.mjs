@@ -11,5 +11,6 @@ export default defineConfig([
     "node_modules/**",
     "next-env.d.ts",
     "cloudflare-env.d.ts",
+    "types/cloudflare-env.d.ts",
   ]),
 ]);

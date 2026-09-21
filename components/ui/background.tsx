@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 export function BackgroundDecoration() {
   return (
     <>
-      <div className="fixed inset-0 bg-linear-to-br from-zinc-900 via-black to-zinc-900 pointer-events-none" />
+      <div className="fixed inset-0 bg-linear-to-br from-auth-background-secondary via-background to-auth-background-secondary pointer-events-none" />
       <motion.div
         className="fixed top-20 left-20 w-72 h-72 bg-primary rounded-full blur-3xl pointer-events-none"
         animate={{
@@ -22,7 +22,7 @@ export function BackgroundDecoration() {
         }}
       />
       <motion.div
-        className="fixed bottom-20 right-20 w-96 h-96 bg-primary rounded-full blur-3xl pointer-events-none"
+        className="fixed bottom-20 right-20 w-96 h-96 bg-auth-primary-strong rounded-full blur-3xl pointer-events-none"
         animate={{
           x: [0, -120, 90, -60, 0],
           y: [0, -100, 70, -50, 0],
@@ -39,4 +39,3 @@ export function BackgroundDecoration() {
     </>
   )
 }
-
