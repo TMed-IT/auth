@@ -198,7 +198,9 @@ GitHub Organizationの **Settings → Secrets and variables → Actions** に次
 | `DOTENV_PRIVATE_KEY_EXTERNAL` | `.env.external` の復号 |
 | `DOTENV_PRIVATE_KEY_INTERNAL` | `.env.internal` の復号 |
 
-`CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` もGitHub Secretsへ登録します。APIトークンにはWorkers Scripts Edit、D1 Edit、Workers R2 Storage Editが必要です。
+`CLOUDFLARE_ACCOUNT_ID` は同じ画面のOrganization Variablesへ登録します。同名のRepository VariablesやEnvironment Variablesは作成しないでください。
+
+`CLOUDFLARE_API_TOKEN` はGitHub Secretsへ登録します。APIトークンにはWorkers Scripts Edit、D1 Edit、Workers R2 Storage Editが必要です。
 
 `main` へのpush時にlint、型検査、テスト、依存関係の監査を実行し、成功後にexternalとinternalをデプロイします。各ジョブはR2バケットを必要に応じて作成し、D1へ [`schema.sql`](./schema.sql) を適用します。
 
