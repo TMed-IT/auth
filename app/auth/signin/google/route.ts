@@ -2,7 +2,7 @@ import { createGoogleAuthUrl, generateCodeChallenge, generateCodeVerifier, gener
 import { getTempCookieMaxAge, setTempCookie, verifyOrigin } from '@/app/api/_auth/token'
 import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server/cors'
 import { getServerEnv, requireEnv } from '@/lib/server/env'
-import { getTrustedAuthOrigin, getTrustedFrontendOrigins, trustedAuthFlowRedirectOrNull } from '@/lib/server/url'
+import { getAllowedAuthOrigins, trustedAuthFlowRedirectOrNull } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 
 type SigninEnv = {
@@ -12,17 +12,9 @@ type SigninEnv = {
   GOOGLE_CLIENT_ID?: string
 }
 
-const getAllowedOrigins = (env: SigninEnv) => {
-  const authOrigin = getTrustedAuthOrigin(env)
-  return [...new Set([
-    ...(authOrigin ? [authOrigin] : []),
-    ...getTrustedFrontendOrigins(env),
-  ])]
-}
-
 export async function POST(req: NextRequest) {
   const env = getServerEnv<SigninEnv>()
-  const allowedOrigins = getAllowedOrigins(env)
+  const allowedOrigins = getAllowedAuthOrigins(env, req)
   if (!verifyOrigin(req, allowedOrigins)) {
     return applyCredentialedCors(
       NextResponse.json(
@@ -72,5 +64,5 @@ export async function POST(req: NextRequest) {
 
 export async function OPTIONS(req: NextRequest) {
   const env = getServerEnv<SigninEnv>()
-  return createCorsPreflightResponse(req, getAllowedOrigins(env))
+  return createCorsPreflightResponse(req, getAllowedAuthOrigins(env, req))
 }

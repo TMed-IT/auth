@@ -43,6 +43,7 @@ const authUrl = getLocalAuthUrl(process.env.AUTH_URL) ?? new URL(defaultAuthUrls
 
 process.env.AUTH_URL = authUrl.origin
 process.env.NEXTJS_ENV = "development"
+process.env.AUTH_ALLOW_ANY_LOCALHOST_REDIRECT = "true"
 
 const { generateWranglerConfig } = await import("./site-config.mjs")
 await generateWranglerConfig(site)

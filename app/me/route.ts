@@ -4,7 +4,7 @@ import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server
 import type { D1Database } from '@/lib/server/d1'
 import { getServerEnv } from '@/lib/server/env'
 import { getSession, revokeSession } from '@/lib/server/sessions'
-import { getDefaultRedirectUrl, getTrustedAuthOrigin, getTrustedFrontendOrigins } from '@/lib/server/url'
+import { getAllowedAuthOrigins, getDefaultRedirectUrl } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 import { normalizeAvatarPath } from '@/lib/avatar'
 
@@ -27,14 +27,6 @@ type UserRow = {
   consented_at: string
 }
 
-const getAllowedOrigins = (env: MeEnv) => {
-  const authOrigin = getTrustedAuthOrigin(env)
-  return [...new Set([
-    ...(authOrigin ? [authOrigin] : []),
-    ...getTrustedFrontendOrigins(env),
-  ])]
-}
-
 const createMeResponse = (
   req: NextRequest,
   env: MeEnv,
@@ -55,7 +47,7 @@ const createMeResponse = (
   )
   deleteLegacyAuthCookie(response.cookies)
   if (clearSession) deleteSessionCookie(response.cookies)
-  return applyCredentialedCors(response, req, getAllowedOrigins(env))
+  return applyCredentialedCors(response, req, getAllowedAuthOrigins(env, req))
 }
 
 export async function GET(req: NextRequest) {
@@ -94,5 +86,5 @@ export async function GET(req: NextRequest) {
 
 export async function OPTIONS(req: NextRequest) {
   const env = getServerEnv<MeEnv>()
-  return createCorsPreflightResponse(req, getAllowedOrigins(env))
+  return createCorsPreflightResponse(req, getAllowedAuthOrigins(env, req))
 }

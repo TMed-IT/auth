@@ -112,6 +112,6 @@ export async function signOut() {
 - ブラウザからの呼び出しには必ず `credentials: "include"` を指定してください。
 - `AUTH_TRUSTED_ORIGINS` には `app,admin,portal` のようにサブドメインラベルだけを登録してください。
 - 完全URL、ドット、パス、ワイルドカードは記述できません。
-- `NEXTJS_ENV=development` の場合だけ `localhost` または `localhost:ポート番号` を登録できます。
+- `pnpm run dev` では `http://localhost` と `http://127.0.0.1` の任意ポートが、リダイレクト先とAuth APIの許可Originとして自動的に許可されます。それ以外の開発実行では、`NEXTJS_ENV=development` の場合だけ `localhost` または `localhost:ポート番号` を登録できます。
 - 旧親ドメインCookieの削除対象Domainは `AUTH_URL` から自動算出されます。
 - 認証・CSRF Cookieをログへ出力しないでください。

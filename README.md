@@ -100,7 +100,7 @@ AUTH_URL=https://auth.example.com
 AUTH_TRUSTED_ORIGINS=app,admin,portal
 ```
 
-この例では `https://app.example.com` などが許可されます。ラベルには英小文字、数字、ハイフンを使用できます。完全なURL、ドット、パス、ワイルドカードは指定できません。開発環境では `localhost` と `localhost:<port>` も使用できます。
+この例では `https://app.example.com` などが許可されます。ラベルには英小文字、数字、ハイフンを使用できます。完全なURL、ドット、パス、ワイルドカードは指定できません。`pnpm run dev` では、`http://localhost` と `http://127.0.0.1` の任意ポートがリダイレクト先とAuth APIの許可Originに自動追加されるため、`AUTH_TRUSTED_ORIGINS` への登録は不要です。
 
 ブラウザからAPIを呼ぶときは `credentials: "include"` を付けます。認証後に元のページへ戻す場合は、`POST /auth/signin/google` のJSON本文へ `redirect` を渡してください。指定がない場合は `Referer`、`Origin`、`AUTH_DEFAULT_REDIRECT_URL` の順に戻り先を決めます。
 

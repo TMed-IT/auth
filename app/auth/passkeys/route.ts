@@ -14,7 +14,7 @@ import { toPublicPasskey } from '@/lib/passkey-policy'
 
 export async function GET(req: NextRequest) {
   const env = getServerEnv<PasskeyEnv>()
-  const allowedOrigins = getPasskeyAllowedOrigins(env)
+  const allowedOrigins = getPasskeyAllowedOrigins(env, req)
   const json = (body: unknown, status = 200) => applyCredentialedCors(
     NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } }),
     req,
@@ -55,5 +55,5 @@ export async function GET(req: NextRequest) {
 
 export async function OPTIONS(req: NextRequest) {
   const env = getServerEnv<PasskeyEnv>()
-  return createCorsPreflightResponse(req, getPasskeyAllowedOrigins(env))
+  return createCorsPreflightResponse(req, getPasskeyAllowedOrigins(env, req))
 }

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  getAllowedAuthOrigins,
   getDefaultRedirectUrl,
   getTrustedAuthOrigin,
   getTrustedFrontendOrigins,
+  trustedRedirectOrNull,
   trustedRedirectOrFallback,
 } from '../lib/server/url.ts'
 
@@ -27,6 +29,28 @@ test('開発環境では127.0.0.1もローカルOriginとして扱う', () => {
 
   assert.equal(getTrustedAuthOrigin(env), 'http://127.0.0.1:3000')
   assert.equal(getDefaultRedirectUrl(env), 'http://127.0.0.1:3000/')
+})
+
+test('pnpm run devでは任意ポートのlocalhostを許可する', () => {
+  const env = {
+    AUTH_URL: 'http://localhost:3000',
+    AUTH_ALLOW_ANY_LOCALHOST_REDIRECT: 'true',
+    NEXTJS_ENV: 'development',
+  }
+
+  assert.equal(
+    trustedRedirectOrNull('http://localhost:5173/dashboard?tab=profile', env),
+    'http://localhost:5173/dashboard?tab=profile',
+  )
+  assert.deepEqual(
+    getAllowedAuthOrigins(
+      env,
+      new Request('http://localhost:3000/me', {
+        headers: { origin: 'http://localhost:8080' },
+      }),
+    ),
+    ['http://localhost:3000', 'http://localhost:8080'],
+  )
 })
 
 test('本番環境ではHTTPのローカルOriginを拒否する', () => {

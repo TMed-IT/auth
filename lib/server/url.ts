@@ -2,6 +2,7 @@ type RedirectEnv = {
   AUTH_URL?: string
   AUTH_DEFAULT_REDIRECT_URL?: string
   AUTH_TRUSTED_ORIGINS?: string
+  AUTH_ALLOW_ANY_LOCALHOST_REDIRECT?: string
   NEXTJS_ENV?: string
 }
 
@@ -114,12 +115,59 @@ export const getTrustedFrontendOrigins = (env: RedirectEnv): string[] => {
   ])]
 }
 
+/**
+ * `pnpm run dev` から起動した場合に限り、任意ポートの localhost を
+ * フロントエンドOriginとして扱う。列挙できない開発サーバーのOriginを
+ * リダイレクト検証とCORS検証で共通して判定するための関数。
+ */
+export const trustedFrontendOriginOrNull = (
+  candidate: string | null,
+  env: RedirectEnv,
+) => {
+  if (!candidate) return null
+
+  try {
+    const url = new URL(candidate)
+    if (url.username || url.password) return null
+
+    const isAnyLocalhostAllowed =
+      isDevelopment(env) &&
+      env.AUTH_ALLOW_ANY_LOCALHOST_REDIRECT === 'true' &&
+      url.protocol === 'http:' &&
+      isLocalHostname(url.hostname)
+
+    return isAnyLocalhostAllowed || getTrustedFrontendOrigins(env).includes(url.origin)
+      ? url.origin
+      : null
+  } catch {
+    return null
+  }
+}
+
+export const getAllowedAuthOrigins = (
+  env: RedirectEnv,
+  req?: Request,
+): string[] => {
+  const authOrigin = getTrustedAuthOrigin(env)
+  const requestOrigins = req
+    ? [req.headers.get('origin'), req.headers.get('referer')]
+      .map((candidate) => trustedFrontendOriginOrNull(candidate, env))
+      .filter((origin): origin is string => origin !== null)
+    : []
+
+  return [...new Set([
+    ...(authOrigin ? [authOrigin] : []),
+    ...getTrustedFrontendOrigins(env),
+    ...requestOrigins,
+  ])]
+}
+
 export const trustedRedirectOrNull = (candidate: string | null, env: RedirectEnv) => {
   if (!candidate) return null
   try {
     const url = new URL(candidate)
     if (url.username || url.password) return null
-    return getTrustedFrontendOrigins(env).includes(url.origin) ? url.toString() : null
+    return trustedFrontendOriginOrNull(url.origin, env) ? url.toString() : null
   } catch {
     return null
   }
@@ -202,7 +250,7 @@ export const trustedEmDashContinuationOrNull = (
 
     const callback = new URL(redirectUri)
     if (
-      !getTrustedFrontendOrigins(env).includes(callback.origin) ||
+      !trustedFrontendOriginOrNull(callback.origin, env) ||
       callback.pathname !== '/_emdash/api/auth/callback' ||
       callback.username ||
       callback.password ||

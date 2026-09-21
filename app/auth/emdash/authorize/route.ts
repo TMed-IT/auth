@@ -9,7 +9,7 @@ import { getServerEnv } from '@/lib/server/env'
 import type { D1Database } from '@/lib/server/d1'
 import {
   getTrustedAuthOrigin,
-  getTrustedFrontendOrigins,
+  trustedFrontendOriginOrNull,
   trustedEmDashContinuationOrNull,
 } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(loginUrl, { status: 302, headers: noStore })
   }
 
-  if (!db || !getTrustedFrontendOrigins(env).includes(new URL(redirectUri).origin)) {
+  if (!db || !trustedFrontendOriginOrNull(new URL(redirectUri).origin, env)) {
     return errorResponse('authorization_error', 'server_configuration_error')
   }
 

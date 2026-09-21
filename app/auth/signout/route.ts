@@ -1,7 +1,7 @@
 import { deleteSessionCookie, deleteCookie, deleteLegacyAuthCookie, generateCsrfToken, setCsrfTokenCookie, verifyCsrfToken, verifyOrigin } from '@/app/api/_auth/token'
 import { getServerEnv } from '@/lib/server/env'
 import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server/cors'
-import { getTrustedAuthOrigin, getTrustedFrontendOrigins } from '@/lib/server/url'
+import { getAllowedAuthOrigins } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 import type { D1Database } from '@/lib/server/d1'
 import { getSession, revokeSession } from '@/lib/server/sessions'
@@ -11,14 +11,6 @@ type SignoutEnv = {
   AUTH_TRUSTED_ORIGINS?: string
   NEXTJS_ENV?: string
   DB?: D1Database
-}
-
-const getAllowedOrigins = (env: SignoutEnv) => {
-  const authOrigin = getTrustedAuthOrigin(env)
-  return [...new Set([
-    ...(authOrigin ? [authOrigin] : []),
-    ...getTrustedFrontendOrigins(env),
-  ])]
 }
 
 const createSignoutResponse = (
@@ -32,7 +24,7 @@ const createSignoutResponse = (
     headers: { 'Cache-Control': 'private, no-store' },
   })
   deleteLegacyAuthCookie(response.cookies)
-  return applyCredentialedCors(response, req, getAllowedOrigins(env))
+  return applyCredentialedCors(response, req, getAllowedAuthOrigins(env, req))
 }
 
 export async function GET(req: NextRequest) {
@@ -59,7 +51,7 @@ export async function POST(req: NextRequest) {
   const response = createSignoutResponse(req, env, { success: true })
   const cookies = response.cookies
   
-  const allowedOrigins = getAllowedOrigins(env)
+  const allowedOrigins = getAllowedAuthOrigins(env, req)
   
   if (allowedOrigins.length === 0 || !verifyOrigin(req, allowedOrigins)) {
     return createSignoutResponse(req, env, { error: 'invalid_origin' }, 403)
@@ -90,5 +82,5 @@ export async function POST(req: NextRequest) {
 
 export async function OPTIONS(req: NextRequest) {
   const env = getServerEnv<SignoutEnv>()
-  return createCorsPreflightResponse(req, getAllowedOrigins(env))
+  return createCorsPreflightResponse(req, getAllowedAuthOrigins(env, req))
 }

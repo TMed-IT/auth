@@ -8,8 +8,8 @@ import type {
 
 import type { D1Database } from '@/lib/server/d1'
 import {
+  getAllowedAuthOrigins,
   getTrustedAuthOrigin,
-  getTrustedFrontendOrigins,
   trustedRedirectOrNull,
 } from '@/lib/server/url'
 import { getSession } from '@/lib/server/sessions'
@@ -62,13 +62,8 @@ export const getPasskeyRelyingParty = (env: PasskeyEnv) => {
   return { origin, rpID: new URL(origin).hostname }
 }
 
-export const getPasskeyAllowedOrigins = (env: PasskeyEnv) => {
-  const authOrigin = getTrustedAuthOrigin(env)
-  return [...new Set([
-    ...(authOrigin ? [authOrigin] : []),
-    ...getTrustedFrontendOrigins(env),
-  ])]
-}
+export const getPasskeyAllowedOrigins = (env: PasskeyEnv, req?: Request) =>
+  getAllowedAuthOrigins(env, req)
 
 export const getPasskeyRedirect = (candidate: unknown, env: PasskeyEnv) =>
   trustedRedirectOrNull(typeof candidate === 'string' ? candidate : null, env)

@@ -6,7 +6,7 @@ import {
 } from '@/lib/server/emdash'
 import { getServerEnv } from '@/lib/server/env'
 import type { D1Database } from '@/lib/server/d1'
-import { getTrustedFrontendOrigins } from '@/lib/server/url'
+import { trustedFrontendOriginOrNull } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 type TokenEnv = {
   DB?: D1Database
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     return json({ error: 'invalid_redirect_uri' }, 400)
   }
   if (
-    !getTrustedFrontendOrigins(env).includes(callback.origin) ||
+    !trustedFrontendOriginOrNull(callback.origin, env) ||
     callback.pathname !== '/_emdash/api/auth/callback' ||
     callback.search ||
     callback.hash
