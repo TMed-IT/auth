@@ -116,7 +116,7 @@ AUTH_TRUSTED_ORIGINS=app,admin,portal
 | `POST` | `/auth/consent` | 同意を記録し、セッションを作成する |
 | `GET` | `/me` | セッションと同意状態を検証し、現在のユーザーを返す |
 | `GET` | `/avatar/:hash` | R2のプロフィール画像を配信する |
-| `GET` | `/auth/signout` | サインアウト用のCSRFトークンを発行する |
+| `GET` | `/auth/signout` | CSRFトークンを発行する。`redirect` 指定時はセッションを失効してリダイレクトする |
 | `POST` | `/auth/signout` | セッションを失効させる |
 | `POST` | `/auth/passkey/authentication/options` | パスキー認証チャレンジを発行する |
 | `POST` | `/auth/passkey/authentication/verify` | 署名を検証してセッションを作成する |

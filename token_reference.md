@@ -84,6 +84,17 @@ export async function fetchMe(): Promise<SessionUser | null> {
 
 ### 3. サインアウト
 
+ブラウザを認証サービスへ遷移させるだけでログアウトし、元のページへ戻せます。`redirect` が許可対象外の場合は `AUTH_DEFAULT_REDIRECT_URL` へ戻ります。
+
+```ts
+export function signOutWithRedirect() {
+  const redirect = encodeURIComponent(window.location.href);
+  window.location.assign(`${AUTH_ORIGIN}/auth/signout?redirect=${redirect}`);
+}
+```
+
+画面遷移せずAPIとしてログアウトする場合は、従来どおりCSRFトークンを取得してPOSTします。
+
 ```ts
 export async function signOut() {
   const tokenResponse = await fetch(`${AUTH_ORIGIN}/auth/signout`, {
