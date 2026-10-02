@@ -59,9 +59,7 @@ const getAuthTarget = () => {
     throw new Error("AUTH_URL must contain only an origin")
   }
 
-  const labels = authUrl.hostname.split(".")
-  const zoneName = labels.length >= 3 ? labels.slice(1).join(".") : authUrl.hostname
-  return { authUrl, isLocalHttp, zoneName }
+  return { authUrl, isLocalHttp }
 }
 
 const getDefaultRedirectUrl = (allowLocalHttp) => {
@@ -114,7 +112,7 @@ export const generateWranglerConfig = async (site) => {
       `R2_AVATAR_BUCKET_NAME must match D1_DATABASE_NAME (${expectedAvatarBucketName})`,
     )
   }
-  const { authUrl, isLocalHttp, zoneName } = getAuthTarget()
+  const { authUrl, isLocalHttp } = getAuthTarget()
   const defaultRedirectUrl = getDefaultRedirectUrl(
     isLocalHttp || process.env.NEXTJS_ENV === "development",
   )
@@ -163,7 +161,7 @@ export const generateWranglerConfig = async (site) => {
     }],
     workers_dev: isLocalHttp,
     ...(!isLocalHttp
-      ? { routes: [{ pattern: `${authUrl.hostname}/*`, zone_name: zoneName }] }
+      ? { routes: [{ pattern: authUrl.hostname, custom_domain: true }] }
       : {}),
   }
 
