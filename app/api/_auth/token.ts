@@ -172,11 +172,7 @@ export const readEncryptedCookie = async (req: Request, name: string): Promise<s
   try {
     const result = await Iron.unseal(encrypted, secret, options)
     return typeof result === 'string' ? result : null
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    if (errorMessage.includes('expired') || errorMessage.includes('ttl')) {
-      return null
-    }
+  } catch {
     return null
   }
 }

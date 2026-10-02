@@ -98,19 +98,19 @@ export async function POST(req: NextRequest) {
   try {
     body = (await req.json()) as typeof body
   } catch {}
-  if (body.agreedToTerms !== true || body.agreedToPrivacy !== true) {
+  if (body?.agreedToTerms !== true || body?.agreedToPrivacy !== true) {
     return NextResponse.json({ error: 'consent_required' }, { status: 400 })
   }
   
   const sessionBinding = data.email
-  const csrfToken = typeof body.csrfToken === 'string' ? body.csrfToken : null
+  const csrfToken = typeof body?.csrfToken === 'string' ? body.csrfToken : null
   if (!(await verifyCsrfToken(req, csrfToken, sessionBinding))) {
     return NextResponse.json({ error: 'csrf_token_invalid' }, { status: 403 })
   }
 
   const db = env.DB as D1Database
   type UserRow = {
-    id: string | null
+    id: string
     email: string
     given_name: string | null
     family_name: string | null
@@ -131,14 +131,17 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'email_not_allowlisted' }, { status: 403 })
       }
 
-      id = existing.id || crypto.randomUUID()
       const nowIso = new Date().toISOString()
       const givenName = data.given_name || ''
       const familyName = data.family_name || ''
       const displayName = data.display_name || `${familyName} ${givenName}`.trim()
-      await db.prepare(
-        'UPDATE users SET id = ?, given_name = ?, family_name = ?, display_name = ?, avatar = ?, consented_at = ? WHERE email = ?',
-      ).bind(id, givenName, familyName, displayName, avatar, nowIso, data.email).run()
+      const updated = await db.prepare(
+        `UPDATE users SET given_name = ?, family_name = ?,
+         display_name = ?, avatar = ?, consented_at = ? WHERE email = ? RETURNING id`,
+      ).bind(givenName, familyName, displayName, avatar, nowIso, data.email)
+        .first<{ id: string }>()
+      if (!updated?.id) throw new Error('Allowlisted user disappeared during consent')
+      id = updated.id
     } else if (existing) {
       if (!existing.id) throw new Error('Existing external user has no id')
       id = existing.id
@@ -157,14 +160,24 @@ export async function POST(req: NextRequest) {
         id,
       ).run()
     } else {
-      id = crypto.randomUUID()
       const nowIso = new Date().toISOString()
       const givenName = data.given_name || ''
       const familyName = data.family_name || ''
       const displayName = data.display_name || `${familyName} ${givenName}`.trim()
-      await db.prepare(
-        'INSERT INTO users(id, email, given_name, family_name, display_name, avatar, created_at, consented_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)',
-      ).bind(id, data.email, givenName, familyName, displayName, avatar, nowIso, nowIso).run()
+      const inserted = await db.prepare(
+        `INSERT INTO users(id, email, given_name, family_name, display_name, avatar, created_at, consented_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(email) DO UPDATE SET
+           given_name = excluded.given_name,
+           family_name = excluded.family_name,
+           display_name = excluded.display_name,
+           avatar = COALESCE(excluded.avatar, users.avatar),
+           consented_at = excluded.consented_at
+         RETURNING id`,
+      ).bind(crypto.randomUUID(), data.email, givenName, familyName, displayName, avatar, nowIso, nowIso)
+        .first<{ id: string }>()
+      if (!inserted?.id) throw new Error('External user could not be created during consent')
+      id = inserted.id
     }
   } catch (dbError) {
     console.error('Database error:', dbError)

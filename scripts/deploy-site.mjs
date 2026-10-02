@@ -38,8 +38,7 @@ try {
       "exec", "wrangler", "r2", "bucket", "create", definition.avatarBucketName,
     ])
   }
-  // Fresh databases are initialized here; subsequent deployments are safe
-  // because schema.sql uses idempotent CREATE statements.
+  // Initialize fresh databases before deploying code.
   await run([
     "exec", "wrangler", "d1", "execute", "DB", "--remote",
     "--config", definition.configPath, "--file", "schema.sql",

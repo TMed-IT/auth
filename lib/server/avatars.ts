@@ -5,6 +5,7 @@ import {
 } from "@/lib/avatar"
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024
+const AVATAR_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const ALLOWED_CONTENT_TYPES = new Set([
   "image/avif",
   "image/gif",
@@ -52,6 +53,22 @@ export const copyGoogleAvatarToR2 = async (
 ): Promise<string | null> => {
   if (!sourceUrl || !isGoogleAvatarUrl(sourceUrl)) return null
 
+  const hash = await getAvatarHash(email)
+  const objectKey = getAvatarObjectKey(hash)
+  const sourceDigest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(sourceUrl),
+  )
+  const sourceTag = Array.from(new Uint8Array(sourceDigest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("")
+  const existing = await bucket.head(objectKey)
+  const age = existing ? Date.now() - existing.uploaded.getTime() : Infinity
+  if (
+    existing?.customMetadata?.sourceTag === sourceTag &&
+    age >= 0 && age < AVATAR_REFRESH_INTERVAL_MS
+  ) return `/avatar/${hash}`
+
   const source = await fetch(sourceUrl, {
     headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif" },
     redirect: "follow",
@@ -72,12 +89,12 @@ export const copyGoogleAvatarToR2 = async (
   }
 
   const bytes = await readBoundedBody(source.body, MAX_AVATAR_BYTES)
-  const hash = await getAvatarHash(email)
-  await bucket.put(getAvatarObjectKey(hash), bytes, {
+  await bucket.put(objectKey, bytes, {
     httpMetadata: {
       contentType,
       cacheControl: "public, max-age=3600, stale-while-revalidate=86400",
     },
+    customMetadata: { sourceTag },
   })
   return `/avatar/${hash}`
 }

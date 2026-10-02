@@ -8,6 +8,7 @@ import { FormEvent, useEffect, useState } from "react"
 import { Logo } from "@/components/ui/logo"
 import { AuthCard } from "@/components/ui/auth-card"
 import { SupportLink } from "@/components/ui/support-link"
+import { isPasskeyNameWithinLimit, normalizePasskeyName } from "@/lib/passkey-policy"
 import siteConfig from "@site-config"
 
 type SessionResponse = { user?: { id?: string } | null }
@@ -125,8 +126,8 @@ export default function PasskeyRegistrationPage() {
   const handleFinish = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!registeredPasskey) return
-    const normalizedName = name.trim()
-    if (!normalizedName || Array.from(normalizedName).length > 64) return
+    const normalizedName = normalizePasskeyName(name)
+    if (!normalizedName) return
 
     if (normalizedName === registeredPasskey.name) {
       window.location.assign(registeredPasskey.redirect)
@@ -207,8 +208,9 @@ export default function PasskeyRegistrationPage() {
                 </span>
                 <input
                   value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  maxLength={64}
+                  onChange={(event) => {
+                    if (isPasskeyNameWithinLimit(event.target.value)) setName(event.target.value)
+                  }}
                   autoFocus
                   disabled={busy}
                   required

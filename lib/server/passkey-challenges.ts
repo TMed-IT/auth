@@ -8,7 +8,10 @@ export const storeAuthenticationChallenge = async (
   const now = new Date()
   const expiresAt = new Date(now.getTime() + maxAgeSeconds * 1000).toISOString()
 
-  await db.prepare('DELETE FROM passkey_authentication_challenges WHERE expires_at <= ?')
+  await db.prepare(`DELETE FROM passkey_authentication_challenges WHERE challenge IN (
+    SELECT challenge FROM passkey_authentication_challenges
+    WHERE expires_at <= ? ORDER BY expires_at LIMIT 100
+  )`)
     .bind(now.toISOString()).run()
   await db.prepare(
     'INSERT INTO passkey_authentication_challenges(challenge, expires_at) VALUES(?, ?)',

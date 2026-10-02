@@ -19,11 +19,15 @@ export type AuthenticationState = {
   redirect: string
 }
 
+export const MAX_PASSKEY_NAME_LENGTH = 64
+
+export const isPasskeyNameWithinLimit = (value: string): boolean =>
+  Array.from(value).length <= MAX_PASSKEY_NAME_LENGTH
+
 export const normalizePasskeyName = (value: unknown): string | null => {
   if (typeof value !== 'string') return null
   const normalized = value.trim()
-  const length = Array.from(normalized).length
-  return length >= 1 && length <= 64 ? normalized : null
+  return normalized && isPasskeyNameWithinLimit(normalized) ? normalized : null
 }
 
 type PasskeyRegistrationDescriptor = {

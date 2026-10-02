@@ -1,5 +1,5 @@
 export type UserAccessRecord = {
-  id: string | null
+  id: string
   consented_at?: string | null
 }
 
@@ -10,7 +10,7 @@ export function decideUserAccess(
   allowSelfRegistration: boolean,
 ): UserAccessDecision {
   if (!user) return allowSelfRegistration ? "consent" : "reject"
-  if (!user.id || !user.consented_at) return "consent"
+  if (!user.consented_at) return "consent"
   return "login"
 }
 

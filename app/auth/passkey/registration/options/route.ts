@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (!db) return json({ error: 'database_error' }, 500)
 
   const body = (await req.json().catch(() => ({}))) as { redirect?: unknown }
-  const redirect = getPasskeyRedirect(body.redirect, env) ?? getDefaultRedirectUrl(env)
+  const redirect = getPasskeyRedirect(body?.redirect, env) ?? getDefaultRedirectUrl(env)
 
   try {
     const user = await getAuthenticatedPasskeyUser(req, db)

@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
 
   const db = env.DB as D1Database
   type UserRow = {
-    id: string | null
+    id: string
     email: string
     given_name: string | null
     family_name: string | null

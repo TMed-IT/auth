@@ -84,7 +84,7 @@ export async function fetchMe(): Promise<SessionUser | null> {
 
 ### 3. サインアウト
 
-ブラウザを認証サービスへ遷移させるだけでログアウトし、元のページへ戻せます。`redirect` が許可対象外の場合は `AUTH_DEFAULT_REDIRECT_URL` へ戻ります。
+許可済みサイトからブラウザを認証サービスへ遷移させると、ログアウトして元のページへ戻せます。ログイン開始時と同様に、遷移元のOriginまたはRefererが許可済みである必要があります。`redirect` が許可対象外の場合は `AUTH_DEFAULT_REDIRECT_URL` へ戻ります。Refererを送らない設定のページでは、下のPOST方式を使用してください。
 
 ```ts
 export function signOutWithRedirect() {

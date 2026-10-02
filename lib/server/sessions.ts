@@ -8,6 +8,14 @@ export type StoredSession = {
   expiresAt: string
 }
 
+const pruneExpiredSessions = async (db: D1Database, now: string) => {
+  await db.prepare(
+    `DELETE FROM sessions WHERE session_hash IN (
+      SELECT session_hash FROM sessions WHERE expires_at <= ? ORDER BY expires_at LIMIT 100
+    )`,
+  ).bind(now).run()
+}
+
 export const createSession = async (
   db: D1Database,
   userId: string,
@@ -18,13 +26,36 @@ export const createSession = async (
   const now = new Date()
   const expiresAt = new Date(now.getTime() + maxAgeSeconds * 1000).toISOString()
 
-  await db.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now.toISOString()).run()
+  await pruneExpiredSessions(db, now.toISOString())
   await db.prepare(
     `INSERT INTO sessions(session_hash, user_id, expires_at, created_at)
      VALUES(?, ?, ?, ?)`,
   ).bind(sessionHash, userId, expiresAt, now.toISOString()).run()
 
   return sessionId
+}
+
+export const createSessionForPasskey = async (
+  db: D1Database,
+  userId: string,
+  credentialId: string,
+  maxAgeSeconds: number,
+): Promise<string | null> => {
+  const sessionId = generateSessionId()
+  const sessionHash = await hashSessionId(sessionId)
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + maxAgeSeconds * 1000).toISOString()
+
+  await pruneExpiredSessions(db, now.toISOString())
+  const inserted = await db.prepare(
+    `INSERT INTO sessions(session_hash, user_id, expires_at, created_at)
+     SELECT ?, user_id, ?, ? FROM passkeys
+     WHERE credential_id = ? AND user_id = ?
+     RETURNING session_hash`,
+  ).bind(sessionHash, expiresAt, now.toISOString(), credentialId, userId)
+    .first<{ session_hash: string }>()
+
+  return inserted ? sessionId : null
 }
 
 export const getSession = async (req: Request, db: D1Database): Promise<StoredSession | null> => {

@@ -10,28 +10,12 @@ import { AuthCard } from "@/components/ui/auth-card"
 import { Logo } from "@/components/ui/logo"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SupportLink } from "@/components/ui/support-link"
+import { getLoginRedirectCandidate } from "@/lib/login-redirect"
 import siteConfig from "@site-config"
 
 type SigninResp = { authUrl?: string }
 type PasskeyVerifyResp = { success?: boolean; redirect?: string; error?: string }
-type MeResponse = { authenticated?: boolean; consented?: boolean }
-
-const normalizeRedirectParam = (value: string | null): string | null => {
-  if (!value) return null
-  try {
-    // If already a valid URL, use as-is.
-    new URL(value)
-    return value
-  } catch {
-    try {
-      const decoded = decodeURIComponent(value)
-      new URL(decoded)
-      return decoded
-    } catch {
-      return null
-    }
-  }
-}
+type MeResponse = { authenticated?: boolean; consented?: boolean; redirectUrl?: string | null }
 
 function LoginPageSkeleton() {
   return (
@@ -87,10 +71,12 @@ export default function LoginPage() {
 
     const checkAccount = async () => {
       try {
-        const response = await fetch('/me', { cache: 'no-store', credentials: 'include' })
+        const redirect = getLoginRedirectCandidate(window.location.search, document.referrer)
+        const meUrl = redirect ? `/me?redirect=${encodeURIComponent(redirect)}` : '/me'
+        const response = await fetch(meUrl, { cache: 'no-store', credentials: 'include' })
         const result = response.ok ? await response.json() as MeResponse : null
         if (result?.authenticated && result.consented) {
-          window.location.replace('/verified')
+          window.location.replace(result.redirectUrl || '/verified')
           return
         }
       } catch {
@@ -106,8 +92,7 @@ export default function LoginPage() {
   }
 
   const getRedirect = () => {
-    const rawRedirect = new URLSearchParams(window.location.search).get('redirect')
-    return normalizeRedirectParam(rawRedirect) ?? normalizeRedirectParam(document.referrer)
+    return getLoginRedirectCandidate(window.location.search, document.referrer)
   }
 
   const handleGoogleLogin = async () => {

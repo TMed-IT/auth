@@ -21,7 +21,7 @@ import {
   type PasskeyUser,
   userIdToBase64Url,
 } from '@/lib/server/passkeys'
-import { createSession } from '@/lib/server/sessions'
+import { createSessionForPasskey } from '@/lib/server/sessions'
 import { consumeAuthenticationChallenge } from '@/lib/server/passkey-challenges'
 
 type AuthenticationPasskeyRow = PasskeyRow & PasskeyUser
@@ -89,17 +89,27 @@ export async function POST(req: NextRequest) {
       return json({ error: 'invalid_challenge' }, 400)
     }
     const now = new Date().toISOString()
-    await db.prepare(
-      'UPDATE passkeys SET counter = ?, last_used_at = ? WHERE credential_id = ? AND user_id = ?',
+    const newCounter = verification.authenticationInfo.newCounter
+    const updated = await db.prepare(
+      `UPDATE passkeys SET counter = ?, last_used_at = ?
+       WHERE credential_id = ? AND user_id = ?
+         AND (counter < ? OR (counter = 0 AND ? = 0))
+       RETURNING credential_id`,
     ).bind(
-      verification.authenticationInfo.newCounter,
+      newCounter,
       now,
       passkey.credential_id,
       passkey.user_id,
-    ).run()
+      newCounter,
+      newCounter,
+    ).first<{ credential_id: string }>()
+    if (!updated) return json({ error: 'invalid_credential' }, 400)
 
     const maxAge = validateSessionMaxAge(env.SESSION_MAX_AGE)
-    const sessionId = await createSession(db, passkey.user_id, maxAge)
+    const sessionId = await createSessionForPasskey(
+      db, passkey.user_id, passkey.credential_id, maxAge,
+    )
+    if (!sessionId) return json({ error: 'invalid_credential' }, 400)
     const response = json({ success: true, redirect: state.redirect })
     setSessionCookie(response.cookies, sessionId)
     return response

@@ -61,11 +61,16 @@ export async function GET(req: NextRequest) {
 
   const db = env.DB
   let user: SessionUser | null = null
-  const session = db ? await getSession(req, db) : null
-  if (session && db) {
-    user = await db.prepare(
-      getSessionUserQuery(),
-    ).bind(session.userId).first<SessionUser>()
+  try {
+    const session = db ? await getSession(req, db) : null
+    if (session && db) {
+      user = await db.prepare(
+        getSessionUserQuery(),
+      ).bind(session.userId).first<SessionUser>()
+    }
+  } catch (error) {
+    console.error('EmDash authorization database error:', error)
+    return errorResponse('authorization_error', 'database_error')
   }
 
   if (!user) {
@@ -87,20 +92,28 @@ export async function GET(req: NextRequest) {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 60_000).toISOString()
 
-  await db.prepare('DELETE FROM emdash_authorization_codes WHERE expires_at <= ?')
-    .bind(now.toISOString()).run()
-  await db.prepare(
-    `INSERT INTO emdash_authorization_codes(
-      code_hash, user_id, redirect_uri, code_challenge, expires_at, created_at
-    ) VALUES(?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    codeHash,
-    user.id,
-    redirectUri,
-    codeChallenge,
-    expiresAt,
-    now.toISOString(),
-  ).run()
+  try {
+    await db.prepare(`DELETE FROM emdash_authorization_codes WHERE code_hash IN (
+      SELECT code_hash FROM emdash_authorization_codes
+      WHERE expires_at <= ? ORDER BY expires_at LIMIT 100
+    )`)
+      .bind(now.toISOString()).run()
+    await db.prepare(
+      `INSERT INTO emdash_authorization_codes(
+        code_hash, user_id, redirect_uri, code_challenge, expires_at, created_at
+      ) VALUES(?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      codeHash,
+      user.id,
+      redirectUri,
+      codeChallenge,
+      expiresAt,
+      now.toISOString(),
+    ).run()
+  } catch (error) {
+    console.error('EmDash authorization database error:', error)
+    return errorResponse('authorization_error', 'database_error')
+  }
 
   const callback = new URL(redirectUri)
   callback.searchParams.set('code', code)

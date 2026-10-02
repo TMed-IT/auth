@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   type SigninBody = { redirect?: string }
   const body = (await req.json().catch(() => ({} as SigninBody))) as SigninBody
   const redirectCandidates = [
-    typeof body.redirect === 'string' ? body.redirect : null,
+    typeof body?.redirect === 'string' ? body.redirect : null,
     req.headers.get('referer'),
     req.headers.get('origin'),
   ]

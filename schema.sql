@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS users (
   email TEXT PRIMARY KEY COLLATE NOCASE NOT NULL,
-  id TEXT UNIQUE NULL,
+  id TEXT NOT NULL UNIQUE CHECK (id <> ''),
   given_name TEXT NULL,
   family_name TEXT NULL,
   display_name TEXT NULL,

@@ -69,20 +69,31 @@ export async function POST(req: NextRequest) {
   if (!db) return json({ error: 'server_configuration_error' }, 500)
 
   const codeHash = await sha256Base64Url(code)
-  const authorization = await db.prepare(
-    `DELETE FROM emdash_authorization_codes
-      WHERE code_hash = ? AND redirect_uri = ? AND expires_at > ?
-      RETURNING user_id, code_challenge`,
-  ).bind(codeHash, redirectUri, new Date().toISOString()).first<AuthorizationCode>()
-
+  let authorization: AuthorizationCode | null
+  try {
+    authorization = await db.prepare(
+      `DELETE FROM emdash_authorization_codes
+        WHERE code_hash = ? AND redirect_uri = ? AND expires_at > ?
+        RETURNING user_id, code_challenge`,
+    ).bind(codeHash, redirectUri, new Date().toISOString()).first<AuthorizationCode>()
+  } catch (error) {
+    console.error('EmDash token database error:', error)
+    return json({ error: 'database_error' }, 500)
+  }
   if (!authorization) return json({ error: 'invalid_grant' }, 400)
   if (!(await verifyCodeChallenge(verifier, authorization.code_challenge))) {
     return json({ error: 'invalid_grant' }, 400)
   }
 
-  const user = await db.prepare(
-    getSessionUserQuery(),
-  ).bind(authorization.user_id).first<SessionUser>()
+  let user: SessionUser | null
+  try {
+    user = await db.prepare(
+      getSessionUserQuery(),
+    ).bind(authorization.user_id).first<SessionUser>()
+  } catch (error) {
+    console.error('EmDash token database error:', error)
+    return json({ error: 'database_error' }, 500)
+  }
   if (!user) return json({ error: 'invalid_grant' }, 400)
 
   const name = user.display_name ||

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { getLoginRedirectCandidate } from '../lib/login-redirect.ts'
 import {
   getAllowedAuthOrigins,
   getDefaultRedirectUrl,
@@ -9,6 +10,18 @@ import {
   trustedRedirectOrNull,
   trustedRedirectOrFallback,
 } from '../lib/server/url.ts'
+
+test('既存セッションと新規ログインで同じ戻り先候補を使う', () => {
+  assert.equal(
+    getLoginRedirectCandidate('?redirect=https%3A%2F%2Fportal.example.com%2Faccount', 'https://portal.example.com/'),
+    'https://portal.example.com/account',
+  )
+  assert.equal(
+    getLoginRedirectCandidate('', 'https://portal.example.com/'),
+    'https://portal.example.com/',
+  )
+  assert.equal(getLoginRedirectCandidate('', ''), null)
+})
 
 test('ローカルのAUTH_URLはポートを維持する', () => {
   const env = {

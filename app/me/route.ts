@@ -4,7 +4,7 @@ import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server
 import type { D1Database } from '@/lib/server/d1'
 import { getServerEnv } from '@/lib/server/env'
 import { getSession, revokeSession } from '@/lib/server/sessions'
-import { getAllowedAuthOrigins, getDefaultRedirectUrl } from '@/lib/server/url'
+import { getAllowedAuthOrigins, getDefaultRedirectUrl, trustedAuthFlowRedirectOrNull } from '@/lib/server/url'
 import { NextRequest, NextResponse } from 'next/server'
 import { normalizeAvatarPath } from '@/lib/avatar'
 
@@ -42,6 +42,9 @@ const createMeResponse = (
       consented: Boolean(safeUser?.consented_at),
       user: safeUser,
       defaultRedirectUrl: user ? getDefaultRedirectUrl(env) : null,
+      redirectUrl: user
+        ? trustedAuthFlowRedirectOrNull(req.nextUrl.searchParams.get('redirect'), env)
+        : null,
     },
     { headers: { 'Cache-Control': 'private, no-store' } },
   )
@@ -57,10 +60,10 @@ export async function GET(req: NextRequest) {
 
   const db = env.DB
   if (!db) {
-    return NextResponse.json(
+    return applyCredentialedCors(NextResponse.json(
       { error: 'database_error' },
       { status: 500, headers: { 'Cache-Control': 'private, no-store' } },
-    )
+    ), req, getAllowedAuthOrigins(env, req))
   }
 
   try {
@@ -77,10 +80,10 @@ export async function GET(req: NextRequest) {
     return createMeResponse(req, env, user)
   } catch (error) {
     console.error('Me lookup error:', error)
-    return NextResponse.json(
+    return applyCredentialedCors(NextResponse.json(
       { error: 'database_error' },
       { status: 500, headers: { 'Cache-Control': 'private, no-store' } },
-    )
+    ), req, getAllowedAuthOrigins(env, req))
   }
 }
 

@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!db) return json({ error: 'database_error' }, 500)
   const body = (await req.json().catch(() => ({}))) as { redirect?: unknown }
   const redirect = trustedAuthFlowRedirectOrNull(
-    typeof body.redirect === 'string' ? body.redirect : null,
+    typeof body?.redirect === 'string' ? body.redirect : null,
     env,
   ) ?? getDefaultRedirectUrl(env)
 

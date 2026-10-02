@@ -40,6 +40,10 @@ const createSignoutRedirect = (location: string) => {
 
 export async function GET(req: NextRequest) {
   const env = getServerEnv<SignoutEnv>()
+  const redirectRequested = req.nextUrl.searchParams.has('redirect')
+  if (redirectRequested && !verifyOrigin(req, getAllowedAuthOrigins(env, req))) {
+    return createSignoutResponse(req, env, { error: 'invalid_origin' }, 403)
+  }
   if (!env.DB) return createSignoutResponse(req, env, { error: 'database_error' }, 500)
 
   let session: Awaited<ReturnType<typeof getSession>>
@@ -50,7 +54,7 @@ export async function GET(req: NextRequest) {
     return createSignoutResponse(req, env, { error: 'database_error' }, 500)
   }
 
-  if (req.nextUrl.searchParams.has('redirect')) {
+  if (redirectRequested) {
     if (session) {
       try {
         await revokeSession(env.DB, session.sessionHash)
@@ -91,7 +95,13 @@ export async function POST(req: NextRequest) {
   }
   
   if (!env.DB) return createSignoutResponse(req, env, { error: 'database_error' }, 500)
-  const session = await getSession(req, env.DB)
+  let session: Awaited<ReturnType<typeof getSession>>
+  try {
+    session = await getSession(req, env.DB)
+  } catch (error) {
+    console.error('Signout session lookup error:', error)
+    return createSignoutResponse(req, env, { error: 'database_error' }, 500)
+  }
   if (!session) {
     const invalidResponse = createSignoutResponse(req, env, { error: 'not_authenticated' }, 401)
     deleteSessionCookie(invalidResponse.cookies)
@@ -102,12 +112,17 @@ export async function POST(req: NextRequest) {
   try {
     body = (await req.json()) as { csrfToken?: string }
   } catch {}
-  const csrfTokenFromRequest = typeof body.csrfToken === 'string' ? body.csrfToken : null
+  const csrfTokenFromRequest = typeof body?.csrfToken === 'string' ? body.csrfToken : null
   if (!(await verifyCsrfToken(req, csrfTokenFromRequest, session.sessionHash))) {
     return createSignoutResponse(req, env, { error: 'csrf_token_invalid' }, 403)
   }
   
-  await revokeSession(env.DB, session.sessionHash)
+  try {
+    await revokeSession(env.DB, session.sessionHash)
+  } catch (error) {
+    console.error('Signout session revocation error:', error)
+    return createSignoutResponse(req, env, { error: 'database_error' }, 500)
+  }
   deleteSessionCookie(cookies)
   deleteCookie(cookies, 'csrf_token')
   return response

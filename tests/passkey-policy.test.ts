@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   getDefaultPasskeyName,
+  isPasskeyNameWithinLimit,
   isRegistrationStateForUser,
   normalizePasskeyName,
   parseRegistrationState,
@@ -60,6 +61,10 @@ test('登録環境からパスキーの初期名を決め、後から付ける�
   assert.equal(normalizePasskeyName('  個人用  '), '個人用')
   assert.equal(normalizePasskeyName(''), null)
   assert.equal(normalizePasskeyName('a'.repeat(65)), null)
+  assert.equal(isPasskeyNameWithinLimit('😀'.repeat(64)), true)
+  assert.equal(normalizePasskeyName('😀'.repeat(64)), '😀'.repeat(64))
+  assert.equal(isPasskeyNameWithinLimit('😀'.repeat(65)), false)
+  assert.equal(normalizePasskeyName('😀'.repeat(65)), null)
 })
 
 test('ログイン後の戻り先は許可サイトと安全な登録継続URLに限定する', () => {

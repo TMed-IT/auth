@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
 
 import { generateWranglerConfig } from "./site-config.mjs"
 
@@ -43,7 +44,7 @@ if (invalidEmails.length > 0) {
 const sqlString = (value) => `'${value.replaceAll("'", "''")}'`
 const sql = emails
   .map((email) =>
-    `INSERT INTO users(email, created_at) VALUES (${sqlString(email)}, datetime('now')) ON CONFLICT(email) DO NOTHING;`,
+    `INSERT INTO users(id, email, created_at) VALUES (${sqlString(randomUUID())}, ${sqlString(email)}, datetime('now')) ON CONFLICT(email) DO NOTHING;`,
   )
   .join("\n")
 

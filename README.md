@@ -89,7 +89,29 @@ pnpm run whitelist:add:internal -- user@example.com
 pnpm run whitelist:add:internal -- user@example.com --remote
 ```
 
-既存のユーザー情報は上書きしません。
+追加時にユーザーIDを発行します。既存のユーザー情報は上書きしません。
+
+Cloudflareダッシュボードから手動で追加する場合は、D1の `auth-internal` を開き、**Console** で次のSQLを実行します。`user@example.com` を追加するメールアドレスに置き換えてください。
+
+```sql
+INSERT INTO users (id, email, created_at)
+VALUES (
+  lower(hex(randomblob(16))),
+  'user@example.com',
+  datetime('now')
+)
+ON CONFLICT(email) DO NOTHING;
+```
+
+追加結果は次のSQLで確認できます。
+
+```sql
+SELECT id, email, created_at, consented_at
+FROM users
+WHERE email = 'user@example.com';
+```
+
+`users.id` は必須です。既存のメールアドレスは変更せず、`consented_at` は本人がログインして同意するまで空のままです。
 
 ## フロントエンドから利用する
 
@@ -116,7 +138,7 @@ AUTH_TRUSTED_ORIGINS=app,admin,portal
 | `POST` | `/auth/consent` | 同意を記録し、セッションを作成する |
 | `GET` | `/me` | セッションと同意状態を検証し、現在のユーザーを返す |
 | `GET` | `/avatar/:hash` | R2のプロフィール画像を配信する |
-| `GET` | `/auth/signout` | CSRFトークンを発行する。`redirect` 指定時はセッションを失効してリダイレクトする |
+| `GET` | `/auth/signout` | CSRFトークンを発行する。`redirect` 指定時は許可済みのOriginまたはRefererからの遷移に限り、セッションを失効してリダイレクトする |
 | `POST` | `/auth/signout` | セッションを失効させる |
 | `POST` | `/auth/passkey/authentication/options` | パスキー認証チャレンジを発行する |
 | `POST` | `/auth/passkey/authentication/verify` | 署名を検証してセッションを作成する |
@@ -202,7 +224,7 @@ GitHub Organizationの **Settings → Secrets and variables → Actions** に次
 
 `CLOUDFLARE_API_TOKEN` はGitHub Secretsへ登録します。APIトークンにはWorkers Scripts Edit、D1 Edit、Workers R2 Storage Editが必要です。
 
-`main` へのpush時にlint、型検査、テスト、依存関係の監査を実行し、成功後にexternalとinternalをデプロイします。各ジョブはR2バケットを必要に応じて作成し、D1へ [`schema.sql`](./schema.sql) を適用します。
+`main` へのpush時にlint、型検査、テスト、依存関係の監査を実行し、成功後にexternalとinternalをデプロイします。各ジョブはR2バケットを必要に応じて作成し、D1へ [`schema.sql`](./schema.sql) を適用してからWorkerを更新します。既存D1の `users.id` 制約更新は手動で適用済みです。
 
 手元からデプロイする場合はWranglerへログインして実行します。
 
