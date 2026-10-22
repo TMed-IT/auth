@@ -17,3 +17,11 @@ overrides:
   "@types/react-dom": 19.2.3
   browserslist: 4.29.0
   postcss: 8.5.23
+  # GHSA-wq5f-xc86-pv6w: Miniflare pins an affected sharp release.
+  sharp: 0.35.5
+  # GHSA-68fv-2mgg-jv7q: update PostCSS and Tailwind's transitive dependency.
+  source-map-js: 1.2.2
+  # GHSA-vfj7-8cjw-p6xm has no fixed braces release. The Next.js ESLint
+  # plugin only uses globSync(pattern, { onlyDirectories: true }), which
+  # tinyglobby supports. Limit the replacement to that plugin.
+  "@next/eslint-plugin-next>fast-glob": npm:tinyglobby@0.2.17

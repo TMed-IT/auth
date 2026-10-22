@@ -23,9 +23,10 @@ Next.jsとCloudflare Workersで動く認証サービスです。Google OAuth 2.0
 
 ## ローカルで起動する
 
-Node.js 24とpnpmを使用します。
+Node.js 24.22.1（LTS）とpnpmを使用します。Node.jsのバージョンは `.nvmrc` で管理し、CIも同じファイルを参照します。
 
 ```bash
+nvm use
 pnpm install
 ```
 
