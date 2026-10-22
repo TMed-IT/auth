@@ -2,6 +2,7 @@ import {
   getAvatarHash,
   getAvatarObjectKey,
   isGoogleAvatarUrl,
+  normalizeAvatarPath,
 } from "@/lib/avatar"
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024
@@ -50,7 +51,14 @@ export const copyGoogleAvatarToR2 = async (
   bucket: CloudflareEnv["AVATARS"],
   email: string,
   sourceUrl: string | undefined,
+  currentAvatar?: string | null,
 ): Promise<string | null> => {
+  // internalで本人が設定した画像はGoogleログインで上書きしない。
+  const currentPath = normalizeAvatarPath(currentAvatar)
+  if (currentPath) {
+    const current = await bucket.head(getAvatarObjectKey(currentPath.slice("/avatar/".length)))
+    if (current?.customMetadata?.source === "internal-upload") return currentPath
+  }
   if (!sourceUrl || !isGoogleAvatarUrl(sourceUrl)) return null
 
   const hash = await getAvatarHash(email)

@@ -126,6 +126,7 @@ export async function GET(req: NextRequest) {
         avatarBucket,
         googleUser.email,
         googleUser.picture,
+        avatarPath,
       ) ?? avatarPath
     } catch (error) {
       console.error(JSON.stringify({

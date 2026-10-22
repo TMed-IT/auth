@@ -51,3 +51,30 @@ test('同じ Google 画像は24時間以内に再取得せず、変更・期限�
   assert.equal(fetches, 3)
   assert.equal(writes, 3)
 })
+
+test('internalで本人が設定した画像はGoogleログインで保持する', async () => {
+  const { copyGoogleAvatarToR2 } = createServerLoader({})(
+    'lib/server/avatars.ts',
+  ) as typeof import('../lib/server/avatars.ts')
+  const hash = 'a'.repeat(64)
+  let checkedKey: string | undefined
+  const bucket = {
+    head: async (key: string) => {
+      checkedKey = key
+      return { customMetadata: { source: 'internal-upload' } }
+    },
+    put: async () => {
+      assert.fail('手動設定画像を書き換えてはいけない')
+    },
+  } as unknown as CloudflareEnv['AVATARS']
+  assert.equal(
+    await copyGoogleAvatarToR2(
+      bucket,
+      'user@example.com',
+      'https://lh3.googleusercontent.com/google',
+      `/avatar/${hash}`,
+    ),
+    `/avatar/${hash}`,
+  )
+  assert.equal(checkedKey, `avatars/${hash}`)
+})
