@@ -1,0 +1,170 @@
+name: OSV automatic remediation
+
+on:
+  workflow_run:
+    workflows: [OSV vulnerability scan, Deploy to Cloudflare]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osv-automatic-remediation
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    # Only scan trusted main. Never execute or download code/artifacts from a PR.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.event != 'merge_group')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install OSV-Scanner
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64 \
+            --output "$RUNNER_TEMP/osv-scanner"
+          echo "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b  $RUNNER_TEMP/osv-scanner" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Check current main for vulnerabilities
+        id: scan
+        run: |
+          status=0
+          osv-scanner scan source --lockfile=pnpm-lock.yaml \
+            --format=json --output-file="$RUNNER_TEMP/osv-before.json" || status=$?
+          case "$status" in
+            0) echo "vulnerable=false" >> "$GITHUB_OUTPUT" ;;
+            1)
+              jq -e '[.results[].packages[]? | .vulnerabilities[]?] | length > 0' "$RUNNER_TEMP/osv-before.json"
+              echo "vulnerable=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Install remediation tools
+        if: steps.scan.outputs.vulnerable == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply available security updates
+        id: plan
+        if: steps.scan.outputs.vulnerable == 'true'
+        run: node scripts/osv-remediation.ts "$RUNNER_TEMP/osv-before.json" "$RUNNER_TEMP/osv-plan.json"
+
+      - name: Install updated dependencies and regenerate lockfile
+        id: install
+        if: steps.plan.outcome == 'success'
+        continue-on-error: true
+        run: pnpm install
+
+      - name: Rescan dependencies
+        id: audit
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: osv-scanner scan source --lockfile=pnpm-lock.yaml
+
+      - name: Lint
+        id: lint
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: pnpm lint
+
+      - name: Type check
+        id: types
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: pnpm exec tsc --noEmit
+
+      - name: Test
+        id: tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: pnpm test
+
+      - name: Build external
+        id: external
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          SITE_CONFIG: external
+        run: pnpm build
+
+      - name: Build internal
+        id: internal
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          SITE_CONFIG: internal
+        run: pnpm build
+
+      - name: Summarize updates and validation
+        id: report
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
+        env:
+          CHECK_RESULTS: ${{ toJSON(steps) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/osv-remediation-report.ts "$RUNNER_TEMP/osv-plan.json" docs/security/osv-remediation.md
+
+      - name: Create or update remediation PR
+        id: pr
+        if: steps.report.outcome == 'success'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ github.token }}
+          branch: automation/osv-remediation
+          base: main
+          delete-branch: true
+          add-paths: |
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            docs/security/osv-remediation.md
+          commit-message: 'fix(deps): remediate OSV vulnerabilities'
+          title: 'fix(deps): OSVで検出された脆弱性への対応'
+          body-path: docs/security/osv-remediation.md
+          draft: ${{ steps.report.outputs.draft }}
+
+      - name: Publish validation status on the PR commit
+        if: steps.pr.outputs.pull-request-head-sha != '' && steps.pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.pr.outputs.pull-request-head-sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          STATE: ${{ steps.report.outputs.state }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f context='OSV remediation / verification' \
+            -f description='OSV, lint, types, tests, and both site builds' -f target_url="$RUN_URL"
+          if [[ "$STATE" == "success" ]] && [[ "$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json isDraft --jq .isDraft)" == "true" ]]; then
+            gh pr ready "$PR_NUMBER" --repo "$REPOSITORY"
+          fi
+
+      - name: Fail if manual remediation is required
+        if: steps.report.outputs.state == 'failure'
+        run: |
+          echo '::error::The remediation PR is a draft because vulnerabilities remain or validation failed. See its report.'
+          exit 1

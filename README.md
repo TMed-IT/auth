@@ -207,10 +207,45 @@ pnpm exec dotenvx encrypt --file .env.internal
 | `pnpm run db:reset:<site>` | ローカルD1の対象テーブルを作り直す |
 | `pnpm run whitelist:add:internal -- <email>` | internalの許可名簿へ追加する |
 | `pnpm lint` | ESLintを実行する |
+| `pnpm run audit:osv` | OSVで依存関係の既知の脆弱性を診断する |
 | `pnpm test` | テストを実行する |
 | `pnpm run cf-typegen` | Cloudflare bindingの型を生成する |
 
 `<site>` は `external` または `internal` です。`db:reset:*` は対象テーブルのデータを削除します。
+
+## 依存関係の脆弱性診断
+
+[OSV-Scanner](https://google.github.io/osv-scanner/) で `pnpm-lock.yaml` の本番用・開発用の依存関係（間接依存を含む）を診断します。ローカルに残っている `package-lock.json` は対象にしません。
+
+GitHub Actionsでは、`main` 向けのPRとマージキュー、毎週月曜9:17（日本時間）、デプロイ前に実行します。Actionsの **OSV vulnerability scan → Run workflow** から手動でも実行できます。重大度を問わず脆弱性が見つかった場合や診断に失敗した場合はチェックが失敗し、デプロイ前の診断が通るまでデプロイを停止します。
+
+結果はActionsの実行ログとSARIF形式の成果物で確認できます。GitHub Code Securityの有効化は不要です。CIではOSV-Scanner v2.7.0の公式ワークフローをコミットSHAで固定しています。
+
+間接依存の修正版への固定は `pnpm-workspace.yaml` の `overrides` で管理します。修正版が未公開の `braces` は、Next.jsのESLintプラグインが使う `fast-glob` だけを `tinyglobby` に置き換えて依存から除いています。ルートディレクトリをglobで指定した場合のページ検出はテストで確認します。
+
+手元ではOSV-Scanner v2を[公式のインストール手順](https://google.github.io/osv-scanner/installation/)に従って導入し、次のコマンドを実行します。診断にはOSVへのネットワーク接続が必要です。
+
+```bash
+# macOS（Homebrew）
+brew install osv-scanner
+
+pnpm run audit:osv
+```
+
+### 検出後の自動修正とPR作成
+
+`OSV automatic remediation` は、`main` の定期診断またはデプロイのワークフローが失敗すると起動します。最新の `main` を改めて診断し、脆弱性がある場合だけ次の処理を行います。Actionsから手動実行することもできます。
+
+1. OSVが示す修正版をnpmで確認し、そのバージョンをOSVへ再照会します。同じメジャー版内の安定版から選び、0.xでは同じマイナー版内に限定します。
+2. 直接依存、既存の `overrides`、該当するバージョンだけに適用する間接依存の `overrides` を更新し、pnpmのlockfileを再生成します。Next.jsの更新時には `eslint-config-next` もそろえます。
+3. OSV再診断、lint、型検査、全テスト、externalとinternalのNext.jsビルドを実行します。
+4. 専用ブランチ `automation/osv-remediation` からPRを作成します。すでにPRがあれば同じPRを更新します。
+
+すべての検証が成功した場合だけレビュー可能なPRにします。修正版が未公開、メジャー更新が必要、または検証が失敗した場合は、残った課題と検証結果を記載したDraft PRを作ります。依存関係を更新できない場合も、報告書だけのDraft PRを作成します。外部APIの障害などで修正候補を確認できない場合は、成功扱いにせずActionsを失敗させます。
+
+結果はPR本文と `docs/security/osv-remediation.md`、PRのコミットステータス **OSV remediation / verification** に記録します。この報告書は脆弱性が検出されたときに生成されます。自動マージは行いません。
+
+追加のPATやGitHub Appは不要です。リポジトリの **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests** を有効にしてください。書き込み権限は自動修正ジョブだけに付与し、PRのコードや成果物は実行しません。通常のPR用ワークフローにはGitHubから実行承認を求められる場合がありますが、上記の検証はPR作成前に自動修正ワークフロー内で完了し、コミットに結果が付きます。
 
 ## デプロイ
 
@@ -225,7 +260,7 @@ GitHub Organizationの **Settings → Secrets and variables → Actions** に次
 
 `CLOUDFLARE_API_TOKEN` はGitHub Secretsへ登録します。APIトークンにはWorkers Scripts Edit、D1 Edit、Workers R2 Storage Editが必要です。
 
-`main` へのpush時にlint、型検査、テスト、依存関係の監査を実行し、成功後にexternalとinternalをデプロイします。各ジョブはR2バケットを必要に応じて作成し、D1へ [`schema.sql`](./schema.sql) を適用してからWorkerを更新します。既存D1の `users.id` 制約更新は手動で適用済みです。
+`main` へのpush時にlint、型検査、テスト、OSVによる依存関係の脆弱性診断を実行し、成功後にexternalとinternalをデプロイします。各ジョブはR2バケットを必要に応じて作成し、D1へ [`schema.sql`](./schema.sql) を適用してからWorkerを更新します。既存D1の `users.id` 制約更新は手動で適用済みです。
 
 手元からデプロイする場合はWranglerへログインして実行します。
 
