@@ -27,3 +27,5 @@ overrides:
   "@next/eslint-plugin-next>fast-glob": npm:tinyglobby@0.2.17
   # GHSA-5j98-mcp5-4vw2: @node-minify/core pins an affected glob release.
   "glob@10.3.3": 10.5.0
+  body-parser@2.3.0: 2.4.0
+  undici@7.29.1: 7.30.1
