@@ -84,7 +84,7 @@ export const getAuthenticatedPasskeyUser = async (
 }
 
 export const getPasskeyUserDisplayName = (user: PasskeyUser) =>
-  user.display_name || `${user.family_name || ''} ${user.given_name || ''}`.trim() || user.id
+  user.display_name || `${user.family_name || ''} ${user.given_name || ''}`.trim() || user.email
 
 export const bytesToBase64Url = (bytes: Uint8Array): Base64URLString => {
   let binary = ''

@@ -206,7 +206,14 @@ test('認証 API は JSON null を通常の入力として処理する', async (
       body: 'null',
     }))
     assert.equal(response.status, route.status, route.path)
-    if (route.path === '/auth/signout') {
+    if (route.path === '/auth/passkeys/register/options') {
+      const options = await response.json() as {
+        user: { id: string; name: string; displayName: string }
+      }
+      assert.equal(options.user.name, 'user@example.com')
+      assert.equal(options.user.displayName, 'user@example.com')
+      assert.equal(Buffer.from(options.user.id, 'base64url').toString(), 'user-1')
+    } else if (route.path === '/auth/signout') {
       assert.deepEqual(await response.json(), { error: 'csrf_token_invalid' })
       assert.equal(response.headers.get('access-control-allow-origin'), origin)
       assert.equal(sql.prepare('SELECT count(*) AS count FROM sessions').get()!.count, 1)

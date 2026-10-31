@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
       rpName: siteConfig.brand.organizationName,
       rpID,
       userId: userIdToBytes(user.id),
-      userName: user.id,
+      userName: user.email,
       userDisplayName: getPasskeyUserDisplayName(user),
       excludeCredentials: existing.results.map((passkey) => ({
         id: passkey.credential_id,
