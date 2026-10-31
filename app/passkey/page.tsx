@@ -68,7 +68,7 @@ export default function PasskeyRegistrationPage() {
     setMessage(null)
     try {
       const redirect = new URLSearchParams(window.location.search).get('redirect')
-      const optionsResponse = await fetch('/auth/passkey/registration/options', {
+      const optionsResponse = await fetch('/auth/passkeys/register/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ redirect: redirect || undefined }),
@@ -81,7 +81,7 @@ export default function PasskeyRegistrationPage() {
 
       const optionsJSON = await optionsResponse.json() as Parameters<typeof startRegistration>[0]['optionsJSON']
       const registrationResponse = await startRegistration({ optionsJSON })
-      const verifyResponse = await fetch('/auth/passkey/registration/verify', {
+      const verifyResponse = await fetch('/auth/passkeys/register/verify', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ response: registrationResponse }),

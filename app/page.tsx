@@ -113,7 +113,7 @@ export default function LoginPage() {
     setPasskeyBusy(true)
     setPasskeyMessage(null)
     try {
-      const optionsResponse = await fetch('/auth/passkey/authentication/options', {
+      const optionsResponse = await fetch('/auth/passkeys/signin/options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ redirect: getRedirect() || undefined }),
@@ -121,7 +121,7 @@ export default function LoginPage() {
       if (!optionsResponse.ok) throw new Error('options_failed')
       const optionsJSON = await optionsResponse.json() as Parameters<typeof startAuthentication>[0]['optionsJSON']
       const authenticationResponse = await startAuthentication({ optionsJSON })
-      const verifyResponse = await fetch('/auth/passkey/authentication/verify', {
+      const verifyResponse = await fetch('/auth/passkeys/signin/verify', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ response: authenticationResponse }),

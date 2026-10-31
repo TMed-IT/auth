@@ -15,6 +15,7 @@ import {
 
 const origin = 'https://auth.example.com'
 const frontend = 'https://portal.example.com'
+const allowRateLimit = { limit: async () => ({ success: true }) }
 
 const baseEnv = () => ({
   AUTH_URL: origin,
@@ -175,7 +176,11 @@ test('認証 API は JSON null を通常の入力として処理する', async (
   t.after(() => sql.close())
   const settings = baseEnv()
   setTestEnv(t, settings)
-  const load = createServerLoader({ ...settings, DB: db }, 'external', {
+  const load = createServerLoader({
+    ...settings,
+    DB: db,
+    PASSKEY_OPTIONS_RATE_LIMITER: allowRateLimit,
+  }, 'external', {
     '@site-config': { __esModule: true, default: externalConfig },
   })
   const { createSession } = load('lib/server/sessions.ts') as typeof import('../lib/server/sessions.ts')
@@ -185,8 +190,8 @@ test('認証 API は JSON null を通常の入力として処理する', async (
   const sessionId = await createSession(db, 'user-1', 3600)
   const routes = [
     { path: '/auth/signin/google', file: 'app/auth/signin/google/route.ts', status: 200 },
-    { path: '/auth/passkey/registration/options', file: 'app/auth/passkey/registration/options/route.ts', status: 200 },
-    { path: '/auth/passkey/authentication/options', file: 'app/auth/passkey/authentication/options/route.ts', status: 200 },
+    { path: '/auth/passkeys/register/options', file: 'app/auth/passkeys/register/options/route.ts', status: 200 },
+    { path: '/auth/passkeys/signin/options', file: 'app/auth/passkeys/signin/options/route.ts', status: 200 },
     { path: '/auth/signout', file: 'app/auth/signout/route.ts', status: 403 },
   ]
   for (const route of routes) {

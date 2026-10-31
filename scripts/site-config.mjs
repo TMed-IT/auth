@@ -155,6 +155,18 @@ export const generateWranglerConfig = async (site) => {
       database_name: process.env.D1_DATABASE_NAME,
       database_id: process.env.D1_DATABASE_ID,
     }],
+    ratelimits: [
+      {
+        name: "PASSKEY_OPTIONS_RATE_LIMITER",
+        namespace_id: "1001",
+        simple: { limit: 100, period: 10 },
+      },
+      {
+        name: "PASSKEY_VERIFY_RATE_LIMITER",
+        namespace_id: "1002",
+        simple: { limit: 50, period: 10 },
+      },
+    ],
     r2_buckets: [{
       binding: "AVATARS",
       bucket_name: avatarBucketName,

@@ -30,6 +30,8 @@ export type PasskeyEnv = {
   SESSION_MAX_AGE?: number | string
   NEXTJS_ENV?: string
   DB?: D1Database
+  PASSKEY_OPTIONS_RATE_LIMITER?: RateLimit
+  PASSKEY_VERIFY_RATE_LIMITER?: RateLimit
 }
 
 export type PasskeyUser = {

@@ -10,21 +10,33 @@ import {
 } from '@/lib/server/passkeys'
 import { getDefaultRedirectUrl, trustedAuthFlowRedirectOrNull } from '@/lib/server/url'
 import { createPasskeyAuthenticationOptions } from '@/lib/webauthn-options'
-import { storeAuthenticationChallenge } from '@/lib/server/passkey-challenges'
+import { checkGlobalRateLimit } from '@/lib/server/rate-limit'
 
 export async function POST(req: NextRequest) {
   const env = getServerEnv<PasskeyEnv>()
   const { origin, rpID } = getPasskeyRelyingParty(env)
   const allowedOrigins = [origin]
-  const json = (body: unknown, status = 200) => applyCredentialedCors(
-    NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } }),
+  const json = (body: unknown, status = 200, headers?: Record<string, string>) => applyCredentialedCors(
+    NextResponse.json(body, {
+      status,
+      headers: { 'Cache-Control': 'private, no-store', ...headers },
+    }),
     req,
     allowedOrigins,
   )
 
   if (!verifyOrigin(req, allowedOrigins)) return json({ error: 'invalid_origin' }, 403)
-  const db = env.DB
-  if (!db) return json({ error: 'database_error' }, 500)
+  const rateLimit = await checkGlobalRateLimit(
+    env.PASSKEY_OPTIONS_RATE_LIMITER,
+    `passkey-options:${origin}`,
+  )
+  if (rateLimit === 'unavailable') {
+    return json({ error: 'server_configuration_error' }, 500)
+  }
+  if (rateLimit === 'limited') {
+    return json({ error: 'temporarily_unavailable' }, 429, { 'Retry-After': '10' })
+  }
+
   const body = (await req.json().catch(() => ({}))) as { redirect?: unknown }
   const redirect = trustedAuthFlowRedirectOrNull(
     typeof body?.redirect === 'string' ? body.redirect : null,
@@ -34,7 +46,6 @@ export async function POST(req: NextRequest) {
   try {
     const options = await createPasskeyAuthenticationOptions(rpID)
     const maxAge = getTempCookieMaxAge()
-    await storeAuthenticationChallenge(db, options.challenge, maxAge)
     const response = json(options)
     await setEncryptedTempCookie(
       response.cookies,

@@ -36,13 +36,13 @@ CREATE TABLE IF NOT EXISTS passkeys (
 
 CREATE INDEX IF NOT EXISTS idx_passkeys_user_id ON passkeys(user_id);
 
-CREATE TABLE IF NOT EXISTS passkey_authentication_challenges (
-  challenge TEXT PRIMARY KEY NOT NULL,
+CREATE TABLE IF NOT EXISTS passkey_consumed_challenges (
+  challenge_hash TEXT PRIMARY KEY NOT NULL,
   expires_at DATETIME NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_passkey_authentication_challenges_expires_at
-  ON passkey_authentication_challenges(expires_at);
+CREATE INDEX IF NOT EXISTS idx_passkey_consumed_challenges_expires_at
+  ON passkey_consumed_challenges(expires_at);
 
 CREATE TABLE IF NOT EXISTS emdash_authorization_codes (
   code_hash TEXT PRIMARY KEY NOT NULL,

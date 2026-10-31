@@ -3,12 +3,12 @@ import test from 'node:test'
 
 import { createSchemaDatabase, createServerLoader } from './support/route-test-kit.ts'
 
-test('セッションとパスキーチャレンジの期限切れ清掃は各要求で100件まで', async (t) => {
+test('セッションと消費済みパスキーチャレンジの期限切れ清掃は各要求で100件まで', async (t) => {
   const { sql, db } = createSchemaDatabase()
   t.after(() => sql.close())
   const load = createServerLoader({})
   const { createSession } = load('lib/server/sessions.ts') as typeof import('../lib/server/sessions.ts')
-  const { storeAuthenticationChallenge } = load('lib/server/passkey-challenges.ts') as
+  const { markAuthenticationChallengeConsumed } = load('lib/server/passkey-challenges.ts') as
     typeof import('../lib/server/passkey-challenges.ts')
   const now = new Date().toISOString()
   const expired = '2000-01-01T00:00:00.000Z'
@@ -19,7 +19,7 @@ test('セッションとパスキーチャレンジの期限切れ清掃は各�
     'INSERT INTO sessions(session_hash, user_id, expires_at, created_at) VALUES(?, ?, ?, ?)',
   )
   const insertChallenge = sql.prepare(
-    'INSERT INTO passkey_authentication_challenges(challenge, expires_at) VALUES(?, ?)',
+    'INSERT INTO passkey_consumed_challenges(challenge_hash, expires_at) VALUES(?, ?)',
   )
   for (let index = 0; index < 120; index++) {
     insertSession.run(`expired-${index}`, 'user-1', expired, expired)
@@ -29,15 +29,15 @@ test('セッションとパスキーチャレンジの期限切れ清掃は各�
   insertChallenge.run('still-valid', '2999-01-01T00:00:00.000Z')
 
   await createSession(db, 'user-1', 3600)
-  await storeAuthenticationChallenge(db, 'new-challenge', 180)
+  assert.equal(await markAuthenticationChallengeConsumed(db, 'new-challenge', 180), true)
 
   const expiredSessions = sql.prepare('SELECT count(*) AS count FROM sessions WHERE expires_at = ?')
     .get(expired)!.count
   const expiredChallenges = sql.prepare(
-    'SELECT count(*) AS count FROM passkey_authentication_challenges WHERE expires_at = ?',
+    'SELECT count(*) AS count FROM passkey_consumed_challenges WHERE expires_at = ?',
   ).get(expired)!.count
   assert.equal(expiredSessions, 20)
   assert.equal(expiredChallenges, 20)
   assert.equal(sql.prepare("SELECT count(*) AS count FROM sessions WHERE session_hash = 'still-valid'").get()!.count, 1)
-  assert.equal(sql.prepare("SELECT count(*) AS count FROM passkey_authentication_challenges WHERE challenge = 'still-valid'").get()!.count, 1)
+  assert.equal(sql.prepare("SELECT count(*) AS count FROM passkey_consumed_challenges WHERE challenge_hash = 'still-valid'").get()!.count, 1)
 })

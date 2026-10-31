@@ -42,6 +42,14 @@ const setup = (
     ENCRYPTION_SECRET: randomBytes(48).toString('base64url'),
     CSRF_SECRET: randomBytes(48).toString('base64url'),
   }
+  let optionsAllowed = true
+  let verifyAllowed = true
+  const optionsRateLimiter = {
+    limit: async () => ({ success: optionsAllowed }),
+  }
+  const verifyRateLimiter = {
+    limit: async () => ({ success: verifyAllowed }),
+  }
   // token.ts also reads process.env for cookie lifetimes and the auth domain.
   for (const [key, value] of Object.entries(env)) {
     const previous = process.env[key]
@@ -67,10 +75,15 @@ const setup = (
   ) VALUES(?, ?, ?, ?, 0, 'multiDevice', 1, ?)`)
     .run(credentialId, userId, 'Test passkey', cose, now)
 
-  const load = createServerLoader({ ...env, DB: db })
+  const load = createServerLoader({
+    ...env,
+    DB: db,
+    PASSKEY_OPTIONS_RATE_LIMITER: optionsRateLimiter,
+    PASSKEY_VERIFY_RATE_LIMITER: verifyRateLimiter,
+  })
   type PostRoute = { POST: (req: Request) => Promise<NextResponse> }
-  const options = load('app/auth/passkey/authentication/options/route.ts') as PostRoute
-  const verify = load('app/auth/passkey/authentication/verify/route.ts') as PostRoute
+  const options = load('app/auth/passkeys/signin/options/route.ts') as PostRoute
+  const verify = load('app/auth/passkeys/signin/verify/route.ts') as PostRoute
   const { getSession } = load('lib/server/sessions.ts') as typeof import('../lib/server/sessions.ts')
   const request = (path: string, body: unknown, cookie = '') => new Request(`${origin}${path}`, {
     method: 'POST',
@@ -78,8 +91,9 @@ const setup = (
     body: JSON.stringify(body),
   })
 
+  const requestOptions = () => options.POST(request('/auth/passkeys/signin/options', {}))
   const issue = async (counter = 0) => {
-    const response = await options.POST(request('/auth/passkey/authentication/options', {}))
+    const response = await requestOptions()
     assert.equal(response.status, 200)
     const { challenge } = await response.json() as { challenge: string }
     const cookie = response.cookies.get('__Host-passkey_authentication')!
@@ -109,9 +123,8 @@ const setup = (
       },
     }
     return {
-      challenge,
       authenticate: () => verify.POST(request(
-        '/auth/passkey/authentication/verify',
+        '/auth/passkeys/signin/verify',
         { response: assertion },
         `${cookie.name}=${cookie.value}`,
       )),
@@ -119,14 +132,24 @@ const setup = (
   }
   const sessionCount = () => sql.prepare('SELECT count(*) AS count FROM sessions').get()!.count
   const readSession = (cookie: string) => getSession(new Request(origin, { headers: { cookie } }), db)
-  return { sql, issue, sessionCount, readSession }
+  const setRateLimits = (allowed: { options?: boolean; verify?: boolean }) => {
+    if (allowed.options !== undefined) optionsAllowed = allowed.options
+    if (allowed.verify !== undefined) verifyAllowed = allowed.verify
+  }
+  return { sql, issue, requestOptions, sessionCount, readSession, setRateLimits }
 }
 
 test('counter=0でも認証リクエストの再送を拒否し、失効後にセッションを再発行しない', async (t) => {
   const { sql, issue, sessionCount, readSession } = setup(t)
   const { authenticate } = await issue()
+  const consumedCount = () => sql.prepare(
+    'SELECT count(*) AS count FROM passkey_consumed_challenges',
+  ).get()!.count
+  assert.equal(consumedCount(), 0)
+
   const first = await authenticate()
   assert.equal(first.status, 200)
+  assert.equal(consumedCount(), 1)
   const sessionId = first.cookies.get('__Host-session')?.value
   assert.ok(sessionId)
   const sessionCookie = `__Host-session=${sessionId}`
@@ -200,20 +223,24 @@ test('別チャレンジの同時認証で署名カウンターを後退させ�
   assert.equal(sessionCount(), 1)
 })
 
-test('Cookieが有効でもD1で期限切れまたは未登録のチャレンジは拒否する', async (t) => {
-  const { sql, issue, sessionCount } = setup(t)
-  const expired = await issue()
-  sql.prepare('UPDATE passkey_authentication_challenges SET expires_at = ? WHERE challenge = ?')
-    .run('2000-01-01T00:00:00.000Z', expired.challenge)
-  const expiredResponse = await expired.authenticate()
-  assert.equal(expiredResponse.status, 400)
-  assert.deepEqual(await expiredResponse.json(), { error: 'invalid_challenge' })
+test('全体サーキットブレーカーはD1処理前にoptionsとverifyを拒否する', async (t) => {
+  const { sql, issue, requestOptions, sessionCount, setRateLimits } = setup(t)
 
-  const missing = await issue()
-  sql.prepare('DELETE FROM passkey_authentication_challenges WHERE challenge = ?').run(missing.challenge)
-  const missingResponse = await missing.authenticate()
-  assert.equal(missingResponse.status, 400)
-  assert.deepEqual(await missingResponse.json(), { error: 'invalid_challenge' })
+  setRateLimits({ options: false })
+  const limitedOptions = await requestOptions()
+  assert.equal(limitedOptions.status, 429)
+  assert.equal(limitedOptions.headers.get('retry-after'), '10')
+  assert.deepEqual(await limitedOptions.json(), { error: 'temporarily_unavailable' })
+
+  setRateLimits({ options: true })
+  const authentication = await issue()
+  setRateLimits({ verify: false })
+  const limitedVerify = await authentication.authenticate()
+  assert.equal(limitedVerify.status, 429)
+  assert.equal(limitedVerify.headers.get('retry-after'), '10')
+  assert.deepEqual(await limitedVerify.json(), { error: 'temporarily_unavailable' })
+  assert.equal(limitedVerify.cookies.get('__Host-passkey_authentication'), undefined)
+  assert.equal(sql.prepare('SELECT count(*) AS count FROM passkey_consumed_challenges').get()!.count, 0)
   assert.equal(sessionCount(), 0)
 })
 

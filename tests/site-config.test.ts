@@ -7,6 +7,18 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const script = resolve(dirname(fileURLToPath(import.meta.url)), '../scripts/site-config.mjs')
+const expectedRateLimits = [
+  {
+    name: 'PASSKEY_OPTIONS_RATE_LIMITER',
+    namespace_id: '1001',
+    simple: { limit: 100, period: 10 },
+  },
+  {
+    name: 'PASSKEY_VERIFY_RATE_LIMITER',
+    namespace_id: '1002',
+    simple: { limit: 50, period: 10 },
+  },
+]
 
 const generateConfig = (site: 'external' | 'internal', authUrl: string) => {
   const directory = mkdtempSync(join(tmpdir(), 'auth-site-config-'))
@@ -43,6 +55,7 @@ test('本番の認証ホストは Custom Domain として生成する', () => {
       pattern: new URL(authUrl).hostname,
       custom_domain: true,
     }])
+    assert.deepEqual(config.ratelimits, expectedRateLimits)
   }
 })
 

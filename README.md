@@ -74,7 +74,7 @@ externalはメールアドレスを `AUTH_EMAIL_ALLOW_REGEX` で確認し、未�
 
 Googleプロフィール画像は、正規化したメールアドレスのSHA-256ハッシュをキーとしてR2へコピーします。同じユーザーの再ログインでは同じオブジェクトを上書きするため、保存される画像は1ユーザーにつき1つです。D1にはGoogleのURLではなく `/avatar/<hash>` を保存します。
 
-パスキーの登録後は、端末と認証器から推定した名前を表示します。利用者は保存前に変更できます。認証チャレンジはD1で一度だけ消費し、同じ署名の再送や同時送信によるセッション再発行を防ぎます。
+パスキーの登録後は、端末と認証器から推定した名前を表示します。利用者は保存前に変更できます。認証チャレンジの発行時は暗号化Cookieだけを使い、D1へは書き込みません。署名検証に成功したチャレンジのハッシュだけをD1へ一度だけ保存し、同じ署名の再送や同時送信によるセッション再発行を防ぎます。
 
 ## internalの許可名簿へ追加する
 
@@ -141,10 +141,10 @@ AUTH_TRUSTED_ORIGINS=app,admin,portal
 | `GET` | `/avatar/:hash` | R2のプロフィール画像を配信する |
 | `GET` | `/auth/signout` | CSRFトークンを発行する。`redirect` 指定時は許可済みのOriginまたはRefererからの遷移に限り、セッションを失効してリダイレクトする |
 | `POST` | `/auth/signout` | セッションを失効させる |
-| `POST` | `/auth/passkey/authentication/options` | パスキー認証チャレンジを発行する |
-| `POST` | `/auth/passkey/authentication/verify` | 署名を検証してセッションを作成する |
-| `POST` | `/auth/passkey/registration/options` | パスキー登録オプションを発行する |
-| `POST` | `/auth/passkey/registration/verify` | パスキーを検証して保存する |
+| `POST` | `/auth/passkeys/signin/options` | パスキー認証チャレンジを発行する |
+| `POST` | `/auth/passkeys/signin/verify` | 署名を検証してセッションを作成する |
+| `POST` | `/auth/passkeys/register/options` | パスキー登録オプションを発行する |
+| `POST` | `/auth/passkeys/register/verify` | パスキーを検証して保存する |
 | `GET` | `/auth/passkeys` | 登録済みパスキーを返す |
 | `PATCH` | `/auth/passkeys/:credentialId` | パスキーの表示名を変更する |
 | `DELETE` | `/auth/passkeys/:credentialId` | パスキーを削除する |
@@ -277,4 +277,5 @@ pnpm run deploy:internal
 - 同意とサインアウトではCSRFトークンに加えて `Origin` または `Referer` を検証します。
 - 認証後の遷移先は `AUTH_DEFAULT_REDIRECT_URL`、`AUTH_TRUSTED_ORIGINS`、認証サービス内の許可済みURLに限定します。
 - Googleプロフィール画像はHTTPSの `googleusercontent.com` からのみ取得し、2 MiBを上限とします。
+- パスキー認証はCloudflareロケーションごとに全利用者共通のサーキットブレーカーを適用します。IPアドレスは制限キーに使用しません。10秒あたりoptionsは100件、verifyは50件を超えると `429` と `Retry-After: 10` を返します。
 - 旧JWT Cookieは削除し、認証には使用しません。

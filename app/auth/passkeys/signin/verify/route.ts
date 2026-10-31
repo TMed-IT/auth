@@ -2,6 +2,7 @@ import { verifyAuthenticationResponse } from '@simplewebauthn/server'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   deleteCookie,
+  getTempCookieMaxAge,
   readEncryptedCookie,
   setSessionCookie,
   validateSessionMaxAge,
@@ -22,7 +23,8 @@ import {
   userIdToBase64Url,
 } from '@/lib/server/passkeys'
 import { createSessionForPasskey } from '@/lib/server/sessions'
-import { consumeAuthenticationChallenge } from '@/lib/server/passkey-challenges'
+import { markAuthenticationChallengeConsumed } from '@/lib/server/passkey-challenges'
+import { checkGlobalRateLimit } from '@/lib/server/rate-limit'
 
 type AuthenticationPasskeyRow = PasskeyRow & PasskeyUser
 
@@ -30,19 +32,41 @@ export async function POST(req: NextRequest) {
   const env = getServerEnv<PasskeyEnv>()
   const { origin, rpID } = getPasskeyRelyingParty(env)
   const allowedOrigins = [origin]
-  const json = (body: unknown, status = 200) => {
+  const json = (
+    body: unknown,
+    status = 200,
+    options: { clearChallenge?: boolean; headers?: Record<string, string> } = {},
+  ) => {
     const response = applyCredentialedCors(
-      NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } }),
+      NextResponse.json(body, {
+        status,
+        headers: { 'Cache-Control': 'private, no-store', ...options.headers },
+      }),
       req,
       allowedOrigins,
     )
-    deleteCookie(response.cookies, AUTHENTICATION_COOKIE)
+    if (options.clearChallenge !== false) deleteCookie(response.cookies, AUTHENTICATION_COOKIE)
     return response
   }
 
   if (!verifyOrigin(req, allowedOrigins)) return json({ error: 'invalid_origin' }, 403)
   const state = parseAuthenticationState(await readEncryptedCookie(req, AUTHENTICATION_COOKIE))
   if (!state) return json({ error: 'invalid_challenge' }, 400)
+
+  const rateLimit = await checkGlobalRateLimit(
+    env.PASSKEY_VERIFY_RATE_LIMITER,
+    `passkey-verify:${origin}`,
+  )
+  if (rateLimit === 'unavailable') {
+    return json({ error: 'server_configuration_error' }, 500)
+  }
+  if (rateLimit === 'limited') {
+    return json(
+      { error: 'temporarily_unavailable' },
+      429,
+      { clearChallenge: false, headers: { 'Retry-After': '10' } },
+    )
+  }
 
   const body = (await req.json().catch(() => null)) as { response?: unknown } | null
   if (!isAuthenticationResponse(body?.response)) return json({ error: 'invalid_request' }, 400)
@@ -85,7 +109,11 @@ export async function POST(req: NextRequest) {
   if (!verification.verified) return json({ error: 'verification_failed' }, 400)
 
   try {
-    if (!(await consumeAuthenticationChallenge(db, state.challenge))) {
+    if (!(await markAuthenticationChallengeConsumed(
+      db,
+      state.challenge,
+      getTempCookieMaxAge(),
+    ))) {
       return json({ error: 'invalid_challenge' }, 400)
     }
     const now = new Date().toISOString()
