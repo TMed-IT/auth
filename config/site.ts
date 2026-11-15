@@ -57,11 +57,10 @@ export type SiteConfig = {
     warning: string
     danger: string
   }
-  publicInfo: {
-    termsUrl: `https://${string}`
-    privacyPolicyUrl: `https://${string}`
-    supportEmail: `${string}@${string}`
-  }
+  publicLinks: readonly {
+    label: string
+    url: `https://${string}`
+  }[]
   login: {
     heading: string
     audienceIcon: "graduation-cap" | "shield-check"
@@ -108,6 +107,7 @@ export type SiteConfig = {
     backButton: string
   }
   support: {
+    email: `${string}@${string}`
     prefix: string
     linkLabel: string
   }
@@ -116,7 +116,7 @@ export type SiteConfig = {
 type SiteConfigDefinition = Pick<SiteConfig, "auth"> & {
   brand: SiteConfig["brand"]
   theme: SiteConfig["theme"]
-  publicInfo: Pick<SiteConfig["publicInfo"], "termsUrl" | "privacyPolicyUrl">
+  publicLinks: SiteConfig["publicLinks"]
   login: Pick<SiteConfig["login"], "audienceIcon" | "audienceHeading" | "accountGuidance">
   error: {
     emailNotAllowlisted: string
@@ -131,10 +131,7 @@ export const defineSiteConfig = (config: SiteConfigDefinition): SiteConfig => ({
   },
   brand: config.brand,
   theme: config.theme,
-  publicInfo: {
-    supportEmail: "support@tmedit.org",
-    ...config.publicInfo,
-  },
+  publicLinks: config.publicLinks,
   login: {
     heading: "ログイン",
     ...config.login,
@@ -159,13 +156,15 @@ export const defineSiteConfig = (config: SiteConfigDefinition): SiteConfig => ({
   },
   consent: {
     heading: "ようこそ",
-    description: "同意して続行ボタンを押すと、利用規約・プライバシーポリシーに同意したとみなされます。",
-    submitButton: "同意して続行",
+    description: config.publicLinks.length
+      ? `内容を確認し、${config.publicLinks.map(({ label }) => label).join("・")}に同意してください。`
+      : "続行ボタンを押して利用登録を完了してください。",
+    submitButton: config.publicLinks.length ? "同意して続行" : "続行",
   },
   verified: {
     heading: "おかえりなさい",
     description: "このアカウントでログインしています。",
-    consentedLabel: "利用規約に同意済み",
+    consentedLabel: config.publicLinks.length ? "同意済み" : "利用登録済み",
     continueButton: "続ける",
   },
   error: {
@@ -182,7 +181,7 @@ export const defineSiteConfig = (config: SiteConfigDefinition): SiteConfig => ({
       expired_session: "セッションの有効期限が切れています",
       no_pending_user: "セッション情報が見つかりません",
       invalid_pending_user: "ユーザー情報が無効です。",
-      consent_required: "利用規約とプライバシーポリシーへの同意が必要です",
+      consent_required: "すべての項目への同意が必要です",
       csrf_token_invalid: "セキュリティトークンの検証に失敗しました",
       email_not_allowlisted: config.error.emailNotAllowlisted,
       database_error: "データベースへの接続に失敗しました",
@@ -211,6 +210,7 @@ export const defineSiteConfig = (config: SiteConfigDefinition): SiteConfig => ({
     backButton: "ログイン画面に戻る",
   },
   support: {
+    email: "support@tmedit.org",
     prefix: "ご不明な点がある場合は、",
     linkLabel: "サポート",
   },

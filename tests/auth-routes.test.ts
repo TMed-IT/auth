@@ -92,7 +92,7 @@ test('内部サイトの未登録拒否と事前登録ユーザーの同意・�
   const consentRequest = () => new NextRequest(`${origin}/auth/consent`, {
     method: 'POST',
     headers: { origin, cookie: requestCookies, 'content-type': 'application/json' },
-    body: JSON.stringify({ csrfToken, agreedToTerms: true, agreedToPrivacy: true }),
+    body: JSON.stringify({ csrfToken, agreedLinks: internalConfig.publicLinks }),
   })
   const responses = await Promise.all([
     consent.POST(consentRequest()),
@@ -158,7 +158,7 @@ test('外部サイトの同時同意は同じユーザー ID で両方のセッ�
   const request = () => new NextRequest(`${origin}/auth/consent`, {
     method: 'POST',
     headers: { origin, cookie: cookies, 'content-type': 'application/json' },
-    body: JSON.stringify({ csrfToken, agreedToTerms: true, agreedToPrivacy: true }),
+    body: JSON.stringify({ csrfToken, agreedLinks: externalConfig.publicLinks }),
   })
   const responses = await Promise.all([consent.POST(request()), consent.POST(request())])
   assert.equal(reads, 2)
@@ -169,6 +169,68 @@ test('外部サイトの同時同意は同じユーザー ID で両方のセッ�
     .get('new@example.com') as { id: string }
   const sessions = sql.prepare('SELECT user_id FROM sessions').all() as { user_id: string }[]
   assert.deepEqual(sessions.map((session) => session.user_id), [user.id, user.id])
+})
+
+test('同意 API は設定されたラベル・URLすべてへの同意を確認し、0件にも対応する', async (t) => {
+  const settings = baseEnv()
+  setTestEnv(t, settings)
+  const links = [
+    { label: '利用規約', url: 'https://example.com/terms' },
+    { label: '個人情報の取り扱い', url: 'https://example.com/privacy' },
+    { label: '追加の利用条件', url: 'https://example.com/conditions' },
+  ] as const
+
+  for (const count of [0, 1, 3]) {
+    await t.test(`${count}件の設定`, async (t) => {
+      const { sql, db } = createSchemaDatabase()
+      t.after(() => sql.close())
+      const configuredLinks = links.slice(0, count)
+      const load = createServerLoader({ ...settings, DB: db }, 'external', {
+        '@site-config': {
+          __esModule: true,
+          default: { ...externalConfig, publicLinks: configuredLinks },
+        },
+      })
+      const { setEncryptedTempCookie } = load('app/api/_auth/token.ts') as typeof import('../app/api/_auth/token.ts')
+      const consent = load('app/auth/consent/route.ts') as {
+        GET: (req: NextRequest) => Promise<NextResponse>
+        POST: (req: NextRequest) => Promise<NextResponse>
+      }
+      const pending = NextResponse.json({})
+      await setEncryptedTempCookie(pending.cookies, 'pending_user', JSON.stringify({ email: 'new@example.com' }), 180)
+      const prepared = await consent.GET(new NextRequest(`${origin}/auth/consent`, {
+        headers: { cookie: cookieHeader(pending) },
+      }))
+      const { csrfToken } = await prepared.json() as { csrfToken: string }
+      const post = (agreedLinks: unknown) => consent.POST(new NextRequest(`${origin}/auth/consent`, {
+        method: 'POST',
+        headers: { origin, cookie: cookieHeader(pending, prepared), 'content-type': 'application/json' },
+        body: JSON.stringify({ csrfToken, agreedLinks }),
+      }))
+
+      const invalid: unknown[] = [null, {}, true, [...configuredLinks, links[0]]]
+      if (count > 0) {
+        invalid.push(
+          configuredLinks.slice(1),
+          configuredLinks.map((link, index) => index ? link : { ...link, label: '別の文書' }),
+          configuredLinks.map((link, index) => index ? link : { ...link, url: 'https://example.com/old' }),
+          [null, ...configuredLinks.slice(1)],
+        )
+      }
+      if (count > 1) invalid.push([...configuredLinks].reverse(), configuredLinks.map(() => links[0]))
+      for (const agreedLinks of invalid) {
+        const rejected = await post(agreedLinks)
+        assert.equal(rejected.status, 400)
+        assert.deepEqual(await rejected.json(), { error: 'consent_required' })
+      }
+      assert.equal(sql.prepare('SELECT count(*) AS count FROM sessions').get()!.count, 0)
+
+      const approved = await post(configuredLinks)
+      assert.equal(approved.status, 200)
+      assert.equal(sql.prepare('SELECT count(*) AS count FROM sessions').get()!.count, 1)
+      assert.ok(sql.prepare('SELECT consented_at FROM users').get()!.consented_at)
+    })
+  }
 })
 
 test('認証 API は JSON null を通常の入力として処理する', async (t) => {
@@ -346,8 +408,10 @@ test('遷移付き GET サインアウトはログインと同じ送信元制限
   ]
   for (const headers of rejectedHeaders) {
     const rejected = await signout.GET(request(headers))
-    assert.equal(rejected.status, 403)
-    assert.deepEqual(await rejected.json(), { error: 'invalid_origin' })
+    assert.equal(rejected.status, 303)
+    const errorUrl = new URL(rejected.headers.get('location')!)
+    assert.equal(errorUrl.pathname, '/error')
+    assert.equal(errorUrl.searchParams.get('code'), 'invalid_origin')
     assert.equal(sessionCount(), 1)
     assert.equal(rejected.cookies.get('__Host-session'), undefined)
   }

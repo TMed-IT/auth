@@ -19,6 +19,18 @@ Next.jsとCloudflare Workersで動く認証サービスです。Google OAuth 2.0
 
 サイト固有の組織名、ロゴ、favicon、配色、規約URL、ログイン案内は [`config/external.ts`](./config/external.ts) と [`config/internal.ts`](./config/internal.ts) にあります。共通の文言と問い合わせ先は [`config/site.ts`](./config/site.ts) で管理します。
 
+ログイン画面と同意画面のリンクは、各設定の `publicLinks` にラベルとHTTPSのURLを組にして記述します。件数に上限はなく、配列の順番で表示します。
+
+```ts
+publicLinks: [
+  { label: "利用規約", url: "https://example.com/terms" },
+  { label: "プライバシーポリシー", url: "https://example.com/privacy" },
+  { label: "サービス利用条件", url: "https://example.com/conditions" },
+],
+```
+
+同意画面では、設定したすべてのリンクにチェックを入れると続行できます。`publicLinks: []` にするとリンクとチェック欄を表示せず、そのまま続行できます。`POST /auth/consent` には `csrfToken` と、同意したラベル・URLの配列 `agreedLinks` を設定順で送ります。
+
 画像は [`brand`](./brand) から各設定ファイルへimportします。ビルド時に `@site-config` が一方の設定だけを読み込むため、選ばなかったサイトの画像は成果物に含まれません。
 
 ## ローカルで起動する

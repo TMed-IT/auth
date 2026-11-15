@@ -1,4 +1,6 @@
 import { deleteSessionCookie, deleteCookie, deleteLegacyAuthCookie, generateCsrfToken, setCsrfTokenCookie, verifyCsrfToken, verifyOrigin } from '@/app/api/_auth/token'
+import { createErrorRedirect } from '@/lib/server/error-response'
+import type { ErrorCode } from '@/config/site'
 import { getServerEnv } from '@/lib/server/env'
 import { applyCredentialedCors, createCorsPreflightResponse } from '@/lib/server/cors'
 import { getAllowedAuthOrigins, trustedRedirectOrFallback } from '@/lib/server/url'
@@ -20,6 +22,14 @@ const createSignoutResponse = (
   body: Record<string, unknown>,
   status = 200,
 ) => {
+  if (
+    status >= 400 && req.method === 'GET' &&
+    (req.nextUrl.searchParams.has('redirect') || req.headers.get('accept')?.includes('text/html'))
+  ) {
+    const response = createErrorRedirect(req, 'authorization_error', body.error as ErrorCode)
+    deleteLegacyAuthCookie(response.cookies)
+    return response
+  }
   const response = NextResponse.json(body, {
     status,
     headers: { 'Cache-Control': 'private, no-store' },

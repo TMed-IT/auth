@@ -2,7 +2,7 @@ import Link from "next/link"
 import siteConfig from "@site-config"
 
 export function SupportLink() {
-  const href = `mailto:${siteConfig.publicInfo.supportEmail}`
+  const href = `mailto:${siteConfig.support.email}`
 
   return (
     <p className="text-sm text-muted-foreground">

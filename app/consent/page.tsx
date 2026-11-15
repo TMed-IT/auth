@@ -19,8 +19,8 @@ import {
 
 export default function ConsentPage() {
   const [submitting, setSubmitting] = useState(false)
-  const [agreedToTerms, setAgreedToTerms] = useState(false)
-  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
+  const [agreements, setAgreements] = useState<boolean[]>(() => siteConfig.publicLinks.map(() => false))
+  const allAgreed = siteConfig.publicLinks.every((_, index) => agreements[index] === true)
   const [csrfToken, setCsrfToken] = useState<string | null>(null)
   const [user, setUser] = useState<AccountInfo | null>(null)
   
@@ -74,7 +74,7 @@ export default function ConsentPage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (submitting || !agreedToTerms || !agreedToPrivacy || !csrfToken) return
+    if (submitting || !allAgreed || !csrfToken) return
     setSubmitting(true)
     
     try {
@@ -86,8 +86,7 @@ export default function ConsentPage() {
         },
         body: JSON.stringify({
           csrfToken,
-          agreedToTerms: true,
-          agreedToPrivacy: true,
+          agreedLinks: siteConfig.publicLinks,
         }),
       })
       
@@ -148,56 +147,38 @@ export default function ConsentPage() {
             </div>
 
             <div className="space-y-4">
-              <label className="flex items-start gap-3 p-4 rounded-lg bg-secondary/70 border border-border hover:border-primary/70 cursor-pointer transition-colors">
-                <input
-                  type="checkbox"
-                  checked={agreedToTerms}
-                  onChange={(e) => setAgreedToTerms(e.target.checked)}
-                  className="mt-0.5 w-5 h-5 rounded border-border bg-secondary text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card"
-                />
-                <div className="text-sm text-foreground/80 flex-1">
-                  <p className="font-semibold text-foreground mb-1">
-                    <a
-                      href={siteConfig.publicInfo.termsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:text-primary/80 underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      利用規約
-                    </a>
-                    に同意します
-                  </p>
-                </div>
-              </label>
-
-              <label className="flex items-start gap-3 p-4 rounded-lg bg-secondary/70 border border-border hover:border-primary/70 cursor-pointer transition-colors">
-                <input
-                  type="checkbox"
-                  checked={agreedToPrivacy}
-                  onChange={(e) => setAgreedToPrivacy(e.target.checked)}
-                  className="mt-0.5 w-5 h-5 rounded border-border bg-secondary text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card"
-                />
-                <div className="text-sm text-foreground/80 flex-1">
-                  <p className="font-semibold text-foreground mb-1">
-                    <a
-                      href={siteConfig.publicInfo.privacyPolicyUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:text-primary/80 underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      プライバシーポリシー
-                    </a>
-                    に同意します
-                  </p>
-                </div>
-              </label>
+              {siteConfig.publicLinks.map(({ label, url }, index) => (
+                <label key={index} className="flex items-start gap-3 p-4 rounded-lg bg-secondary/70 border border-border hover:border-primary/70 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={agreements[index] === true}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setAgreements((current) => current.map((agreed, i) => i === index ? checked : agreed))
+                    }}
+                    className="mt-0.5 w-5 h-5 rounded border-border bg-secondary text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card"
+                  />
+                  <div className="text-sm text-foreground/80 flex-1 min-w-0 break-words">
+                    <p className="font-semibold text-foreground mb-1">
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:text-primary/80 underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {label}
+                      </a>
+                      に同意します
+                    </p>
+                  </div>
+                </label>
+              ))}
             </div>
 
             <button
               type="submit"
-              disabled={submitting || !agreedToTerms || !agreedToPrivacy || !csrfToken}
+              disabled={submitting || !allAgreed || !csrfToken}
               className="w-full rounded-xl bg-auth-primary-strong text-primary-foreground hover:bg-auth-primary-strong/90 disabled:opacity-70 disabled:pointer-events-none shadow-sm border border-auth-primary-strong py-4 px-4 transition-colors flex items-center justify-center gap-3 text-sm font-medium"
             >
               {submitting ? (

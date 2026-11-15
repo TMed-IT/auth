@@ -6,7 +6,7 @@ export type { ErrorKey } from "@/config/site"
 export const ERROR_MESSAGES: Record<ErrorKey, string> = siteConfig.error.messages
 
 export function getErrorDetailMessage(errorCode: string): string | null {
-  return errorCode in siteConfig.error.details
+  return Object.hasOwn(siteConfig.error.details, errorCode)
     ? siteConfig.error.details[errorCode as keyof typeof siteConfig.error.details]
     : null
 }
@@ -19,7 +19,7 @@ export function getErrorMessage(key: string): string | null {
 }
 
 export function isValidErrorKey(key: string): key is ErrorKey {
-  return key in ERROR_MESSAGES
+  return Object.hasOwn(ERROR_MESSAGES, key)
 }
 
 export function redirectToError(key: ErrorKey, errorCode?: string): void {

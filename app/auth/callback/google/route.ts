@@ -1,5 +1,6 @@
 import { exchangeCodeForToken, getGoogleUserInfo, verifyGoogleIdToken } from '@/app/api/_auth/auth'
 import { deleteCookie, getTempCookieMaxAge, readCookie, setEncryptedTempCookie, setSessionCookie, validateSessionMaxAge } from '@/app/api/_auth/token'
+import { createErrorRedirect } from '@/lib/server/error-response'
 import { getServerEnv, requireEnv } from '@/lib/server/env'
 import { trustedAuthFlowRedirectOrFallback } from '@/lib/server/url'
 import type { D1Database } from '@/lib/server/d1'
@@ -33,7 +34,7 @@ type EnvBasic = {
   AVATARS?: CloudflareEnv['AVATARS']
 }
 
-export async function GET(req: NextRequest) {
+async function handleCallback(req: NextRequest) {
   const env = getServerEnv<EnvBasic>()
   const url = new URL(req.url)
   const code = url.searchParams.get('code')
@@ -164,5 +165,18 @@ export async function GET(req: NextRequest) {
     console.error('Database error:', dbError)
     deleteCookie(cookies, 'pending_user')
     return errorResponse('database_error')
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    return await handleCallback(req)
+  } catch (error) {
+    console.error('Google callback failed:', error)
+    const response = createErrorRedirect(req, 'oauth_error')
+    for (const name of ['oauth_state', 'oauth_nonce', 'pkce_verifier', 'oauth_redirect', 'pending_user']) {
+      deleteCookie(response.cookies, name)
+    }
+    return response
   }
 }

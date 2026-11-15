@@ -7,7 +7,7 @@ const config = defineSiteConfig({
     allowSelfRegistration: true,
   },
   brand: {
-    organizationName: "東邦大学医学部学生自治会",
+    organizationName: "東邦大学医学部 学生自治会",
     logoPath: externalBrandImage,
     faviconPath: externalBrandImage,
   },
@@ -26,10 +26,10 @@ const config = defineSiteConfig({
     warning: "#fcd34d",
     danger: "#fca5a5",
   },
-  publicInfo: {
-    termsUrl: "https://tmedit.org/terms",
-    privacyPolicyUrl: "https://tmedit.org/privacy",
-  },
+  publicLinks: [
+    { label: "利用規約", url: "https://tohom.org/terms" },
+    { label: "プライバシーポリシー", url: "https://tohom.org/privacy" },
+  ],
   login: {
     audienceIcon: "graduation-cap",
     audienceHeading: "ご利用いただく方へ",

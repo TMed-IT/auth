@@ -92,13 +92,19 @@ export async function POST(req: NextRequest) {
 
   let body: {
     csrfToken?: string
-    agreedToTerms?: boolean
-    agreedToPrivacy?: boolean
+    agreedLinks?: unknown
   } = {}
   try {
     body = (await req.json()) as typeof body
   } catch {}
-  if (body?.agreedToTerms !== true || body?.agreedToPrivacy !== true) {
+  const agreedLinks = body?.agreedLinks
+  if (
+    !Array.isArray(agreedLinks) ||
+    agreedLinks.length !== siteConfig.publicLinks.length ||
+    !siteConfig.publicLinks.every(({ label, url }, index) =>
+      agreedLinks[index]?.label === label && agreedLinks[index]?.url === url,
+    )
+  ) {
     return NextResponse.json({ error: 'consent_required' }, { status: 400 })
   }
   

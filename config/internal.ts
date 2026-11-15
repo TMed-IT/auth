@@ -26,10 +26,12 @@ const config = defineSiteConfig({
     warning: "#fcd34d",
     danger: "#fca5a5",
   },
-  publicInfo: {
-    termsUrl: "https://tmedit.org/internal/terms",
-    privacyPolicyUrl: "https://tmedit.org/internal/privacy",
-  },
+  publicLinks: [
+    { label: "規定", url: "https://tmedit.org/docs/regulations" },
+    { label: "利用規約", url: "https://tohom.org/internal-terms" },
+    { label: "機密情報及び成果物取扱規程", url: "https://tmedit.org/docs/governance" },
+    { label: "プライバシーポリシー", url: "https://tohom.org/privacy" },
+  ],
   login: {
     audienceIcon: "shield-check",
     audienceHeading: "部員のみなさまへ",

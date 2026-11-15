@@ -3,13 +3,14 @@
 import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser"
 import { motion } from "framer-motion"
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
  
 import { GraduationCap, KeyRound, ShieldCheck } from "lucide-react"
 import { AuthCard } from "@/components/ui/auth-card"
 import { Logo } from "@/components/ui/logo"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SupportLink } from "@/components/ui/support-link"
+import { redirectToError } from "@/lib/error"
 import { getLoginRedirectCandidate } from "@/lib/login-redirect"
 import siteConfig from "@site-config"
 
@@ -53,7 +54,11 @@ function LoginPageSkeleton() {
 async function startSignin(redirect?: string | null) {
   const r = await fetch('/auth/signin/google', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect: redirect || undefined }) })
   const j = (await r.json().catch(() => null)) as SigninResp | null
-  if (j && typeof j.authUrl === 'string') window.location.assign(j.authUrl)
+  if (!r.ok || !j || typeof j.authUrl !== 'string') {
+    redirectToError('oauth_error')
+    return
+  }
+  window.location.assign(j.authUrl)
 }
 
 export default function LoginPage() {
@@ -100,6 +105,7 @@ export default function LoginPage() {
       await startSignin(getRedirect())
     } catch (error) {
       console.error("Login error:", error)
+      redirectToError("oauth_error")
     }
   }
 
@@ -214,17 +220,20 @@ export default function LoginPage() {
               </p>
             )}
 
-            <p className="text-xs text-muted-foreground text-center">
-              ログインすることで
-              <Link href={siteConfig.publicInfo.termsUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
-                利用規約
-              </Link>
-              と
-              <Link href={siteConfig.publicInfo.privacyPolicyUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
-                プライバシーポリシー
-              </Link>
-              に同意したものとみなされます
-            </p>
+            {siteConfig.publicLinks.length > 0 && (
+              <p className="text-xs text-muted-foreground text-center break-words">
+                ログインすることで
+                {siteConfig.publicLinks.map(({ label, url }, index) => (
+                  <Fragment key={index}>
+                    {index > 0 && "・"}
+                    <Link href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary/80">
+                      {label}
+                    </Link>
+                  </Fragment>
+                ))}
+                に同意したものとみなされます
+              </p>
+            )}
           </div>
         </AuthCard>
 
